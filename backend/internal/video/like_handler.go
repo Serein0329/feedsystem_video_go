@@ -1,8 +1,9 @@
 package video
 
 import (
-	"feedsystem_video_go/internal/apierror"
-	"feedsystem_video_go/internal/middleware/jwt"
+	"feedsystem_video_go/internal/mw"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,97 +19,67 @@ func NewLikeHandler(service *LikeService) *LikeHandler {
 func (lh *LikeHandler) Like(c *gin.Context) {
 	var req LikeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	if req.VideoID <= 0 {
-		c.JSON(400, gin.H{"error": "video_id is required"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-
+	accountID, _ := mw.GetAccountIDByGIN(c)
 	like := &Like{
 		VideoID:   req.VideoID,
 		AccountID: accountID,
 	}
 	if err := lh.service.Like(c.Request.Context(), like); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErr(c, err)
 		return
 	}
-	c.JSON(200, gin.H{"message": "like success"})
+	response.Success(c, nil)
 }
 
 func (lh *LikeHandler) Unlike(c *gin.Context) {
 	var req LikeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.VideoID <= 0 {
-		c.JSON(400, gin.H{"error": "video_id is required"})
-		return
-	}
-
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
+	accountID, _ := mw.GetAccountIDByGIN(c)
 
 	like := &Like{
 		VideoID:   req.VideoID,
 		AccountID: accountID,
 	}
 	if err := lh.service.Unlike(c.Request.Context(), like); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErr(c, err)
 		return
 	}
-	c.JSON(200, gin.H{"message": "unlike success"})
+	response.Success(c, nil)
 }
 
 func (lh *LikeHandler) IsLiked(c *gin.Context) {
 	var req LikeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	if req.VideoID <= 0 {
-		c.JSON(400, gin.H{"error": "video_id is required"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
+	accountID, _ := mw.GetAccountIDByGIN(c)
 	isLiked, err := lh.service.IsLiked(c.Request.Context(), req.VideoID, accountID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErr(c, err)
 		return
 	}
-	c.JSON(200, gin.H{"is_liked": isLiked})
+	response.Success(c, gin.H{"isLiked": isLiked})
 }
 
 func (lh *LikeHandler) ListMyLikedVideos(c *gin.Context) {
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
+	accountID, _ := mw.GetAccountIDByGIN(c)
 
 	videos, err := lh.service.ListLikedVideos(c.Request.Context(), accountID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	if videos == nil {
 		videos = []Video{}
 	}
-	c.JSON(200, videos)
+	response.Success(c, videos)
 }

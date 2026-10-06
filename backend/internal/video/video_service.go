@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"feedsystem_video_go/internal/db/rabbitmq"
+	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"log"
 	"strconv"
 	"strings"
 	"time"
 
-	"feedsystem_video_go/internal/apierror"
-	"feedsystem_video_go/internal/middleware/rabbitmq"
-	rediscache "feedsystem_video_go/internal/middleware/redis"
-
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -27,22 +28,9 @@ func NewVideoService(repo *VideoRepository, cache *rediscache.Client, popularity
 }
 
 func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
-	if video == nil {
-		return errors.New("video is nil")
-	}
 	video.Title = strings.TrimSpace(video.Title)
 	video.PlayURL = strings.TrimSpace(video.PlayURL)
 	video.CoverURL = strings.TrimSpace(video.CoverURL)
-
-	if video.Title == "" {
-		return errors.New("title is required")
-	}
-	if video.PlayURL == "" {
-		return errors.New("play url is required")
-	}
-	if video.CoverURL == "" {
-		return errors.New("cover url is required")
-	}
 
 	//事务保证视频写入库和消息写入本地消息表的一致性
 	err := vs.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -61,7 +49,7 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 			return err
 		}
 
-		tags := ExtractTags(video.Title + " " + video.Description)
+		tags := ExtractTags(video.Description)
 		for _, tagName := range tags {
 			var tag Tag
 			if err := tx.Where("name = ?", tagName).FirstOrCreate(&tag, Tag{Name: tagName}).Error; err != nil {
@@ -74,7 +62,6 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 		return nil
 	})
 	return err
-
 }
 
 func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) error {
@@ -82,24 +69,23 @@ func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) erro
 	if err != nil {
 		return err
 	}
-	if video == nil {
-		return errors.New("video not found")
-	}
 	if video.AuthorID != authorID {
-		return apierror.ErrUnauthorized
+		return apierror.ErrForbidden
 	}
 	if err := vs.repo.DeleteVideo(ctx, id); err != nil {
 		return err
 	}
 	if vs.cache != nil {
 		cacheKey := vs.cache.Key("video:detail:id=%d", id)
-		_ = vs.cache.Del(context.Background(), cacheKey)
+		if err = vs.cache.Del(context.Background(), cacheKey); err != nil {
+			log.Printf("failed to delete cache key:%s, err:%v", cacheKey, err)
+		}
 	}
 	return nil
 }
 
 func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID uint) ([]Video, error) {
-	videos, err := vs.repo.ListByAuthorID(ctx, int64(authorID))
+	videos, err := vs.repo.ListByAuthorID(ctx, authorID)
 	if err != nil {
 		return nil, err
 	}
@@ -109,19 +95,19 @@ func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID uint) ([]Vi
 func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) {
 	cacheKey := vs.cache.Key("video:detail:id=%d", id)
 
-	getCached := func() (*Video, bool) {
+	getCached := func() (*Video, error) {
 		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 
 		b, err := vs.cache.GetBytes(opCtx, cacheKey)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
 		var cached Video
 		if err := json.Unmarshal(b, &cached); err != nil {
-			return nil, false
+			return nil, err
 		}
-		return &cached, true
+		return &cached, err
 	}
 
 	setCached := func(video *Video) {
@@ -131,24 +117,16 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 		}
 		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
-		_ = vs.cache.SetBytes(opCtx, cacheKey, b, vs.cacheTTL)
+		if err := vs.cache.SetBytes(opCtx, cacheKey, b, vs.cacheTTL); err != nil {
+			log.Printf("failed to set cache key:%s, err:%v", cacheKey, err)
+		}
 	}
 
 	if vs.cache != nil {
-		if v, ok := getCached(); ok {
+		if v, err := getCached(); err == nil {
 			return v, nil
-		}
-
-		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-		b, err := vs.cache.GetBytes(opCtx, cacheKey)
-		cancel()
-		if err == nil {
-			var cached Video
-			if err := json.Unmarshal(b, &cached); err == nil {
-				return &cached, nil
-			}
-		} else if rediscache.IsMiss(err) {
-			lockKey := "lock:" + cacheKey
+		} else if errors.Is(err, redis.Nil) {
+			lockKey := vs.cache.Key("lock:%s", cacheKey)
 
 			lockCtx, lockCancel := context.WithTimeout(ctx, 50*time.Millisecond)
 			token, locked, lockErr := vs.cache.Lock(lockCtx, lockKey, 2*time.Second)
@@ -156,8 +134,7 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 
 			if lockErr == nil && locked {
 				defer func() { _ = vs.cache.Unlock(context.Background(), lockKey, token) }()
-
-				if v, ok := getCached(); ok {
+				if v, err := getCached(); err == nil {
 					return v, nil
 				}
 
@@ -176,7 +153,7 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 					return nil, ctx.Err()
 				case <-time.After(20 * time.Millisecond):
 				}
-				if v, ok := getCached(); ok {
+				if v, err := getCached(); err == nil {
 					return v, nil
 				}
 			}

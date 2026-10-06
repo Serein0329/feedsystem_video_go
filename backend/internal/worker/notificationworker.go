@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"feedsystem_video_go/internal/middleware/rabbitmq"
+	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
+	"feedsystem_video_go/internal/notification"
 	"log"
 	"time"
 
@@ -12,16 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
-type Notification struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	RecipientID uint      `gorm:"index;not null" json:"recipient_id"`
-	SenderID    uint      `gorm:"not null" json:"sender_id"`
-	Type        string    `gorm:"type:varchar(50);not null" json:"type"`
-	TargetID    uint      `json:"target_id"`
-	Content     string    `gorm:"type:varchar(255)" json:"content"`
-	IsRead      bool      `gorm:"default:false" json:"is_read"`
-	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
-}
+// Notification 定义在 internal/notification 包，这里保留别名以便包内（ssehub 等）沿用旧引用。
+type Notification = notification.Notification
 
 type NotificationWorker struct {
 	ch    *amqp.Channel
@@ -101,7 +94,7 @@ func (w *NotificationWorker) process(ctx context.Context, d amqp.Delivery) error
 
 	switch {
 	case routingKey == "like.like":
-		var evt rabbitmq.LikeEvent
+		var evt rabbitmq2.LikeEvent
 		if err := json.Unmarshal(body, &evt); err != nil {
 			return nil
 		}
@@ -121,7 +114,7 @@ func (w *NotificationWorker) process(ctx context.Context, d amqp.Delivery) error
 		notif = &Notification{RecipientID: authorID, SenderID: evt.UserID, Type: "like", TargetID: evt.VideoID, Content: "点赞了你的视频"}
 
 	case routingKey == "comment.publish":
-		var evt rabbitmq.CommentEvent
+		var evt rabbitmq2.CommentEvent
 		if err := json.Unmarshal(body, &evt); err != nil {
 			return nil
 		}
@@ -141,7 +134,7 @@ func (w *NotificationWorker) process(ctx context.Context, d amqp.Delivery) error
 		notif = &Notification{RecipientID: authorID, SenderID: evt.AuthorID, Type: "comment", TargetID: evt.VideoID, Content: "评论了你的视频"}
 
 	case routingKey == "social.follow":
-		var evt rabbitmq.SocialEvent
+		var evt rabbitmq2.SocialEvent
 		if err := json.Unmarshal(body, &evt); err != nil {
 			return nil
 		}

@@ -2,6 +2,8 @@ package video
 
 import (
 	"context"
+	"errors"
+	"feedsystem_video_go/internal/pkg/apierror"
 
 	"gorm.io/gorm"
 )
@@ -18,8 +20,8 @@ func (r *CommentRepository) CreateComment(ctx context.Context, comment *Comment)
 	return r.db.WithContext(ctx).Create(comment).Error
 }
 
-func (r *CommentRepository) DeleteComment(ctx context.Context, comment *Comment) error {
-	return r.db.WithContext(ctx).Delete(comment).Error
+func (r *CommentRepository) DeleteComment(ctx context.Context, commentID uint) error {
+	return r.db.WithContext(ctx).Delete(&Comment{}, commentID).Error
 }
 
 func (r *CommentRepository) GetAllComments(ctx context.Context, videoID uint) ([]Comment, error) {
@@ -32,22 +34,19 @@ func (r *CommentRepository) GetAllComments(ctx context.Context, videoID uint) ([
 	return comments, err
 }
 
-func (r *CommentRepository) IsExist(ctx context.Context, id uint) (bool, error) {
-	var comment Comment
-	if err := r.db.WithContext(ctx).First(&comment, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return false, nil
-		}
+func (r *CommentRepository) IsExist(ctx context.Context, commentID uint) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&Comment{}).Where("id = ?", commentID).Count(&count).Error; err != nil {
 		return false, err
 	}
-	return true, nil
+	return count > 0, nil
 }
 
 func (r *CommentRepository) GetByID(ctx context.Context, id uint) (*Comment, error) {
 	var comment Comment
 	if err := r.db.WithContext(ctx).First(&comment, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, nil
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apierror.ErrCommentNotFound
 		}
 		return nil, err
 	}

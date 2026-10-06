@@ -3,31 +3,32 @@ package main
 import (
 	"context"
 	"feedsystem_video_go/internal/config"
-	"feedsystem_video_go/internal/db"
+	"feedsystem_video_go/internal/db/mysql"
+	"feedsystem_video_go/internal/db/rabbitmq"
+	rediscache "feedsystem_video_go/internal/db/redis"
 	apphttp "feedsystem_video_go/internal/http"
-	rabbitmq "feedsystem_video_go/internal/middleware/rabbitmq"
-	rediscache "feedsystem_video_go/internal/middleware/redis"
-	"feedsystem_video_go/internal/observability"
+	"feedsystem_video_go/internal/pkg/logger"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// 加载 .env（本地开发）
+	logger.Init()
+
+	//导入.env文件到环境变量
 	if err := godotenv.Load(); err != nil {
 		log.Println(".env not found; continuing")
 	}
 
-	// 加载配置
+	//获取配置文件
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "configs/config.yaml"
 	}
-	log.Printf("Loading config from %s", configPath)
+	log.Println("Loading config from " + configPath)
 	cfg, usedDefault, err := config.LoadLocalDev(configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -39,15 +40,14 @@ func main() {
 	}
 
 	// 连接数据库
-	//log.Printf("Database config: %v", cfg.Database)
-	sqlDB, err := db.NewDB(cfg.Database)
+	sqlDB, err := mysql.NewDB(&cfg.Database)
 	if err != nil {
 		log.Fatalf("Failed to connect database: %v", err)
 	}
-	if err := db.AutoMigrate(sqlDB); err != nil {
+	if err := mysql.AutoMigrate(sqlDB); err != nil {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
-	defer db.CloseDB(sqlDB)
+	defer mysql.CloseDB(sqlDB)
 
 	// 连接 Redis (可选，用于缓存)
 	cache, err := rediscache.NewFromEnv(&cfg.Redis)
@@ -63,7 +63,7 @@ func main() {
 			cache = nil
 		} else {
 			defer cache.Close()
-			log.Printf("Redis connected (cache enabled)")
+			log.Println("Redis connected (cache enabled)")
 		}
 	}
 
@@ -74,25 +74,22 @@ func main() {
 		rmq = nil
 	} else {
 		defer rmq.Close()
-		log.Printf("RabbitMQ connected")
+		log.Println("RabbitMQ connected")
 	}
+
 	// Pprof
-	pprofServer, err := observability.NewPprofServer(
+	pprofServer, err := apphttp.NewPprofServer(
 		"API",
-		cfg.ObservabilityConfig.Pprof.Enabled,
-		cfg.ObservabilityConfig.Pprof.ApiAddr,
+		cfg.Pprof.Enabled,
+		cfg.Pprof.ApiAddr,
 	)
 	if err != nil {
 		log.Printf("Failed to start API pprof server: %v", err)
 	}
 	if pprofServer != nil {
-		defer pprofServer.Close()
+		defer pprofServer.Shutdown()
 	}
 
-	// 设置路由
-	r := apphttp.SetRouter(sqlDB, cache, rmq)
-	log.Printf("Server is running on port %d", cfg.Server.Port)
-	if err := r.Run(":" + strconv.Itoa(cfg.Server.Port)); err != nil {
-		log.Fatalf("Failed to run server: %v", err)
-	}
+	// GIN
+	apphttp.Start(cfg, sqlDB, cache, rmq)
 }

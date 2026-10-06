@@ -2,18 +2,13 @@ package account
 
 import (
 	"context"
-	"errors"
-	"feedsystem_video_go/internal/auth"
+	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/hash"
+	"feedsystem_video_go/internal/pkg/jwt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
-
-	rediscache "feedsystem_video_go/internal/middleware/redis"
-
-	"github.com/go-sql-driver/mysql"
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 type AccountService struct {
@@ -21,21 +16,16 @@ type AccountService struct {
 	cache             *rediscache.Client
 }
 
-var (
-	ErrUsernameTaken       = errors.New("username already exists")
-	ErrNewUsernameRequired = errors.New("new_username is required")
-)
-
 func NewAccountService(accountRepository *AccountRepository, cache *rediscache.Client) *AccountService {
 	return &AccountService{accountRepository: accountRepository, cache: cache}
 }
 
 func (as *AccountService) CreateAccount(ctx context.Context, account *Account) error {
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(account.Password), bcrypt.DefaultCost)
+	passwordHash, err := hash.HashPassword(account.Password)
 	if err != nil {
 		return err
 	}
-	account.Password = string(passwordHash)
+	account.Password = passwordHash
 	if err := as.accountRepository.CreateAccount(ctx, account); err != nil {
 		return err
 	}
@@ -43,49 +33,39 @@ func (as *AccountService) CreateAccount(ctx context.Context, account *Account) e
 }
 
 func (as *AccountService) Rename(ctx context.Context, accountID uint, newUsername string) (string, error) {
-	if newUsername == "" {
-		return "", ErrNewUsernameRequired
-	}
-
-	token, err := auth.GenerateToken(accountID, newUsername)
+	token, err := jwt.GenerateToken(accountID, newUsername)
 	if err != nil {
 		return "", err
 	}
 
 	if err := as.accountRepository.RenameWithToken(ctx, accountID, newUsername, token); err != nil {
-		var mysqlErr *mysql.MySQLError
-		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
-			return "", ErrUsernameTaken
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", err
-		}
 		return "", err
 	}
 	if as.cache != nil {
 		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 
-		if err := as.cache.SetBytes(cacheCtx, as.cache.Key("account:%d", accountID), []byte(token), 24*time.Hour); err != nil {
-			log.Printf("failed to set cache: %v", err)
+		key := as.cache.Key("account:%d:access", accountID)
+		if err := as.cache.SetBytes(cacheCtx, key, []byte(token), 24*time.Hour); err != nil {
+			log.Printf("failed to set cache key:%s, err:%v", key, err)
 		}
 	}
 	return token, nil
 }
 
-func (as *AccountService) ChangePassword(ctx context.Context, username, oldPassword, newPassword string) error {
-	account, err := as.FindByUsername(ctx, username)
+func (as *AccountService) ChangePassword(ctx context.Context, id uint, oldPassword, newPassword string) error {
+	account, err := as.FindByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(account.Password), []byte(oldPassword)); err != nil {
-		return err
+	if !hash.ComparePassword(account.Password, oldPassword) {
+		return apierror.ErrUserPasswordWrong
 	}
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	passwordHash, err := hash.HashPassword(newPassword)
 	if err != nil {
 		return err
 	}
-	if err := as.accountRepository.ChangePassword(ctx, account.ID, string(passwordHash)); err != nil {
+	if err := as.accountRepository.ChangePassword(ctx, account.ID, passwordHash); err != nil {
 		return err
 	}
 	if err := as.Logout(ctx, account.ID); err != nil {
@@ -115,14 +95,14 @@ func (as *AccountService) Login(ctx context.Context, username, password string) 
 	if err != nil {
 		return "", "", err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(account.Password), []byte(password)); err != nil {
-		return "", "", err
+	if !hash.ComparePassword(account.Password, password) {
+		return "", "", apierror.ErrUserPasswordWrong
 	}
-	accessToken, err := auth.GenerateToken(account.ID, account.Username)
+	accessToken, err := jwt.GenerateToken(account.ID, account.Username)
 	if err != nil {
 		return "", "", err
 	}
-	refreshToken, err := auth.GenerateRefreshToken(account.ID)
+	refreshToken, err := jwt.GenerateRefreshToken(account.ID, account.Username)
 	if err != nil {
 		return "", "", err
 	}
@@ -133,14 +113,13 @@ func (as *AccountService) Login(ctx context.Context, username, password string) 
 		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 
-		if err := as.cache.SetBytes(cacheCtx, as.cache.Key("account:%d", account.ID), []byte(accessToken), 24*time.Hour); err != nil {
-			log.Printf("failed to set cache: %v", err)
+		accessKey := as.cache.Key("account:%d:access", account.ID)
+		refreshKey := as.cache.Key("account:%d:refresh", account.ID)
+		if err := as.cache.SetBytes(cacheCtx, accessKey, []byte(accessToken), 24*time.Hour); err != nil {
+			log.Printf("failed to set cache key:%s, err:%v", accessKey, err)
 		}
-		if err := as.cache.SetBytes(cacheCtx, as.cache.Key("account:%d:refresh", account.ID), []byte(refreshToken), 7*24*time.Hour); err != nil {
-			log.Printf("failed to set refresh cache: %v", err)
-		}
-		if err := as.cache.SetBytes(cacheCtx, as.cache.Key("refresh:%s", refreshToken), []byte(strconv.FormatUint(uint64(account.ID), 10)), 7*24*time.Hour); err != nil {
-			log.Printf("failed to set refresh lookup: %v", err)
+		if err := as.cache.SetBytes(cacheCtx, refreshToken, []byte(refreshToken), 7*24*time.Hour); err != nil {
+			log.Printf("failed to set cache key:%s, err:%v", refreshKey, err)
 		}
 	}
 	return accessToken, refreshToken, nil
@@ -158,16 +137,13 @@ func (as *AccountService) Logout(ctx context.Context, accountID uint) error {
 		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 
-		if err := as.cache.Del(cacheCtx, as.cache.Key("account:%d", account.ID)); err != nil {
-			log.Printf("failed to del cache: %v", err)
+		accessKey := as.cache.Key("account:%d:access", account.ID)
+		refreshKey := as.cache.Key("account:%d:refresh", account.ID)
+		if err := as.cache.Del(cacheCtx, accessKey); err != nil {
+			log.Printf("failed to del cache key:%s, err:%v", accessKey, err)
 		}
-		if err := as.cache.Del(cacheCtx, as.cache.Key("account:%d:refresh", account.ID)); err != nil {
-			log.Printf("failed to del refresh cache: %v", err)
-		}
-		if account.RefreshToken != "" {
-			if err := as.cache.Del(cacheCtx, as.cache.Key("refresh:%s", account.RefreshToken)); err != nil {
-				log.Printf("failed to del refresh lookup: %v", err)
-			}
+		if err := as.cache.Del(cacheCtx, refreshKey); err != nil {
+			log.Printf("failed to del cache key:%s, err:%v", refreshKey, err)
 		}
 	}
 	return as.accountRepository.Logout(ctx, account.ID)
@@ -182,7 +158,7 @@ func (as *AccountService) FindAll(ctx context.Context) ([]*Account, error) {
 }
 
 func (as *AccountService) UpdateProfile(ctx context.Context, accountID uint, req *UpdateProfileRequest) error {
-	updates := map[string]interface{}{}
+	updates := map[string]any{}
 	if req.Bio != "" {
 		updates["bio"] = strings.TrimSpace(req.Bio)
 	}
@@ -190,55 +166,57 @@ func (as *AccountService) UpdateProfile(ctx context.Context, accountID uint, req
 		updates["avatar_url"] = strings.TrimSpace(req.AvatarURL)
 	}
 	if len(updates) == 0 {
-		return errors.New("nothing to update")
+		return apierror.ErrUserNoFieldsToUpdate
 	}
 	return as.accountRepository.UpdateFields(ctx, accountID, updates)
 }
 
-func (as *AccountService) RefreshAccessToken(ctx context.Context, refreshToken string) (string, uint, string, error) {
-	if refreshToken == "" {
-		return "", 0, "", errors.New("refresh token is empty")
-	}
+func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, refreshToken string) (string, error) {
 	if as.cache != nil {
 		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
-		b, err := as.cache.GetBytes(cacheCtx, as.cache.Key("refresh:%s", refreshToken))
+		cacheRefresh, err := as.cache.GetBytes(cacheCtx, as.cache.Key("account:%d:refresh", id))
 		if err == nil {
-			idStr := string(b)
-			id, parseErr := strconv.ParseUint(idStr, 10, 64)
-			if parseErr == nil {
-				account, err := as.FindByID(ctx, uint(id))
-				if err == nil && account != nil && account.RefreshToken == refreshToken {
-					newToken, err := auth.GenerateToken(account.ID, account.Username)
-					if err != nil {
-						return "", 0, "", err
-					}
-					if err := as.accountRepository.UpdateToken(ctx, account.ID, newToken); err != nil {
-						return "", 0, "", err
-					}
-					if err := as.cache.SetBytes(cacheCtx, as.cache.Key("account:%d", account.ID), []byte(newToken), 24*time.Hour); err != nil {
-						log.Printf("failed to set cache: %v", err)
-					}
-					return newToken, account.ID, account.Username, nil
+			if string(cacheRefresh) == refreshToken {
+				account, err := as.FindByID(ctx, id)
+				if err != nil {
+					return "", err
 				}
+				newToken, err := jwt.GenerateToken(id, account.Username)
+				if err != nil {
+					return "", err
+				}
+				if err := as.accountRepository.UpdateToken(ctx, id, newToken); err != nil {
+					return "", err
+				}
+				key := as.cache.Key("account:%d:access", id)
+				if err := as.cache.SetBytes(cacheCtx, key, []byte(newToken), 24*time.Hour); err != nil {
+					log.Printf("failed to set cache key:%s, err:%v", key, err)
+				}
+				return newToken, nil
 			}
 		}
 	}
-	accounts, err := as.FindAll(ctx)
+
+	accounts, err := as.FindByID(ctx, id)
 	if err != nil {
-		return "", 0, "", err
+		return "", err
 	}
-	for _, acc := range accounts {
-		if acc.RefreshToken == refreshToken {
-			newToken, err := auth.GenerateToken(acc.ID, acc.Username)
-			if err != nil {
-				return "", 0, "", err
-			}
-			if err := as.accountRepository.UpdateToken(ctx, acc.ID, newToken); err != nil {
-				return "", 0, "", err
-			}
-			return newToken, acc.ID, acc.Username, nil
+	if accounts.RefreshToken == refreshToken {
+		newToken, err := jwt.GenerateToken(id, accounts.Username)
+		if err != nil {
+			return "", err
 		}
+		if err := as.accountRepository.UpdateToken(ctx, id, newToken); err != nil {
+			return "", err
+		}
+		if as.cache != nil {
+			key := as.cache.Key("account:%d:access", id)
+			if err := as.cache.SetBytes(ctx, key, []byte(newToken), 24*time.Hour); err != nil {
+				log.Printf("failed to set cache key:%s, err:%v", key, err)
+			}
+		}
+		return newToken, nil
 	}
-	return "", 0, "", errors.New("invalid refresh token")
+	return "", nil
 }

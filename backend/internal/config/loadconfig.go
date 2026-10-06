@@ -5,25 +5,28 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Server              ServerConfig        `yaml:"server"`
-	Database            DatabaseConfig      `yaml:"database"`
-	Redis               RedisConfig         `yaml:"redis"`
-	RabbitMQ            RabbitMQConfig      `yaml:"rabbitmq"`
-	ObservabilityConfig ObservabilityConfig `yaml:"observability"`
+	Server   ServerConfig   `yaml:"server"`
+	Database DatabaseConfig `yaml:"database"`
+	Redis    RedisConfig    `yaml:"redis"`
+	RabbitMQ RabbitMQConfig `yaml:"rabbitmq"`
+	Pprof    PprofConfig    `yaml:"pprof"`
 }
 
 type ServerConfig struct {
-	Port int `yaml:"port"`
+	Port         string        `yaml:"port"`
+	ReadTimeout  time.Duration `yaml:"read_timeout"`
+	WriteTimeout time.Duration `yaml:"write_timeout"`
 }
 
 type DatabaseConfig struct {
 	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
+	Port     string `yaml:"port"`
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	DBName   string `yaml:"dbname"`
@@ -31,40 +34,37 @@ type DatabaseConfig struct {
 
 type RedisConfig struct {
 	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
+	Port     string `yaml:"port"`
 	Password string `yaml:"password"`
 	DB       int    `yaml:"db"`
 }
 
 type RabbitMQConfig struct {
 	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
+	Port     string `yaml:"port"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
 }
 
-type ObservabilityConfig struct {
-	Pprof PprofConfig `yaml:"pprof"`
-}
 type PprofConfig struct {
 	Enabled    bool   `yaml:"enabled"`
 	ApiAddr    string `yaml:"api_addr"`
 	WorkerAddr string `yaml:"worker_addr"`
 }
 
-func Load(filename string) (Config, error) {
+func Load(filename string) (*Config, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return Config{}, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return Config{}, fmt.Errorf("parse config %s: %w", filename, err)
+		return nil, fmt.Errorf("parse config %s: %w", filename, err)
 	}
 
 	ApplyEnvOverrides(&cfg)
-	return cfg, nil
+	return &cfg, nil
 }
 
 func ApplyEnvOverrides(cfg *Config) {
@@ -72,17 +72,13 @@ func ApplyEnvOverrides(cfg *Config) {
 		return
 	}
 	if v := os.Getenv("SERVER_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.Server.Port = port
-		}
+		cfg.Server.Port = v
 	}
 	if v := os.Getenv("MYSQL_HOST"); v != "" {
 		cfg.Database.Host = v
 	}
 	if v := os.Getenv("MYSQL_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.Database.Port = port
-		}
+		cfg.Database.Port = v
 	}
 	if v := os.Getenv("MYSQL_USER"); v != "" {
 		cfg.Database.User = v
@@ -100,9 +96,7 @@ func ApplyEnvOverrides(cfg *Config) {
 		cfg.Redis.Host = v
 	}
 	if v := os.Getenv("REDIS_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.Redis.Port = port
-		}
+		cfg.Redis.Port = v
 	}
 	if v := os.Getenv("REDIS_PASSWORD"); v != "" {
 		cfg.Redis.Password = v
@@ -116,9 +110,7 @@ func ApplyEnvOverrides(cfg *Config) {
 		cfg.RabbitMQ.Host = v
 	}
 	if v := os.Getenv("RABBITMQ_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.RabbitMQ.Port = port
-		}
+		cfg.RabbitMQ.Port = v
 	}
 	if v := os.Getenv("RABBITMQ_USER"); v != "" {
 		cfg.RabbitMQ.Username = v
@@ -128,8 +120,8 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 }
 
-// bool用来表示是否使用了默认配置，true表示使用了默认配置
-func LoadLocalDev(filename string) (Config, bool, error) {
+// LoadLocalDev bool用来表示是否使用了默认配置，true表示使用了默认配置
+func LoadLocalDev(filename string) (*Config, bool, error) {
 	cfg, err := Load(filename)
 	if err == nil {
 		return cfg, false, nil
@@ -137,41 +129,50 @@ func LoadLocalDev(filename string) (Config, bool, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return DefaultLocalConfig(), true, nil
 	}
-	return Config{}, false, err
+	return nil, false, err
 }
 
-func DefaultLocalConfig() Config {
+func DefaultLocalConfig() *Config {
 	cfg := Config{
 		Server: ServerConfig{
-			Port: 8080,
+			Port:         "8080",
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
 		},
 		Database: DatabaseConfig{
 			Host:     "localhost",
-			Port:     3306,
+			Port:     "3306",
 			User:     "root",
 			Password: "123456",
-			DBName:   "feedsystem",
+			DBName:   "feedsystem_video",
 		},
 		Redis: RedisConfig{
 			Host:     "localhost",
-			Port:     6379,
+			Port:     "6379",
 			Password: "123456",
 			DB:       0,
 		},
 		RabbitMQ: RabbitMQConfig{
 			Host:     "localhost",
-			Port:     5672,
+			Port:     "5672",
 			Username: "admin",
-			Password: "password123",
+			Password: "123456",
 		},
-		ObservabilityConfig: ObservabilityConfig{
-			Pprof: PprofConfig{
-				Enabled:    true,
-				ApiAddr:    "localhost:6060",
-				WorkerAddr: "localhost:6061",
-			},
+		Pprof: PprofConfig{
+			Enabled:    true,
+			ApiAddr:    "localhost:6060",
+			WorkerAddr: "localhost:6061",
 		},
 	}
 	ApplyEnvOverrides(&cfg)
-	return cfg
+	return &cfg
+}
+
+func (d DatabaseConfig) DSN() string {
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		d.User, d.Password, d.Host, d.Port, d.DBName)
+}
+
+func (r RabbitMQConfig) DSN() string {
+	return fmt.Sprintf("amqp://%s:%s@%s:%s/", r.Username, r.Password, r.Host, r.Port)
 }

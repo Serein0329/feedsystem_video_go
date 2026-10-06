@@ -2,7 +2,9 @@ package social
 
 import (
 	"context"
+	"errors"
 	"feedsystem_video_go/internal/account"
+	"feedsystem_video_go/internal/pkg/apierror"
 
 	"gorm.io/gorm"
 )
@@ -16,7 +18,13 @@ func NewSocialRepository(db *gorm.DB) *SocialRepository {
 }
 
 func (r *SocialRepository) Follow(ctx context.Context, social *Social) error {
-	return r.db.WithContext(ctx).Create(social).Error
+	if err := r.db.WithContext(ctx).Create(social).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apierror.ErrSocialeExist
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *SocialRepository) Unfollow(ctx context.Context, social *Social) error {
@@ -26,27 +34,13 @@ func (r *SocialRepository) Unfollow(ctx context.Context, social *Social) error {
 }
 
 func (r *SocialRepository) GetAllFollowers(ctx context.Context, VloggerID uint) ([]*account.Account, error) {
-	var relations []Social
-	if err := r.db.WithContext(ctx).
-		Model(&Social{}).
-		Where("vlogger_id = ?", VloggerID).
-		Limit(200).
-		Find(&relations).Error; err != nil {
-		return nil, err
-	}
-
-	followerIDs := make([]uint, 0, len(relations))
-	for _, rel := range relations {
-		followerIDs = append(followerIDs, rel.FollowerID)
-	}
-	if len(followerIDs) == 0 {
-		return []*account.Account{}, nil
-	}
-
 	var followers []*account.Account
 	if err := r.db.WithContext(ctx).
 		Model(&account.Account{}).
-		Where("id IN ?", followerIDs).
+		Select("accounts.*").
+		Joins("JOIN socials s ON s.follower_id = accounts.id").
+		Where("s.vlogger_id = ?", VloggerID).
+		Limit(200).
 		Find(&followers).Error; err != nil {
 		return nil, err
 	}
@@ -54,27 +48,13 @@ func (r *SocialRepository) GetAllFollowers(ctx context.Context, VloggerID uint) 
 }
 
 func (r *SocialRepository) GetAllVloggers(ctx context.Context, FollowerID uint) ([]*account.Account, error) {
-	var relations []Social
-	if err := r.db.WithContext(ctx).
-		Model(&Social{}).
-		Where("follower_id = ?", FollowerID).
-		Limit(200).
-		Find(&relations).Error; err != nil {
-		return nil, err
-	}
-
-	vloggerIDs := make([]uint, 0, len(relations))
-	for _, rel := range relations {
-		vloggerIDs = append(vloggerIDs, rel.VloggerID)
-	}
-	if len(vloggerIDs) == 0 {
-		return []*account.Account{}, nil
-	}
-
 	var vloggers []*account.Account
 	if err := r.db.WithContext(ctx).
 		Model(&account.Account{}).
-		Where("id IN ?", vloggerIDs).
+		Select("accounts.*").
+		Joins("JOIN socials s ON s.vlogger_id = accounts.id").
+		Where("s.follower_id = ?", FollowerID).
+		Limit(200).
 		Find(&vloggers).Error; err != nil {
 		return nil, err
 	}

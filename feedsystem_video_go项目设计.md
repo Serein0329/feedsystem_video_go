@@ -15,7 +15,7 @@
 | 异步执行        | Worker（Go）                 | `cmd/worker`：LikeWorker/CommentWorker/SocialWorker/PopularityWorker；API 进程内启动 OutboxPoller、TimelineConsumer 与 NotificationWorker。 |
 | 文件存储        | Local Disk（可替换对象存储） | 视频与封面文件存放本地目录（生产可替换为 OSS/S3/MinIO）。    |
 | 容器化/依赖编排 | Docker / Docker Compose      | 一键拉起 RabbitMQ 等依赖（可配合 `./start.sh`），便于本地联调与部署环境一致性。 |
-| 接口调试        | Postman Collection           | `test/postman.json`：预置变量、批量跑接口与部分断言脚本。    |
+| 接口调试        | Postman Collection           | `api_test`：预置变量、批量跑接口与部分断言脚本。    |
 | 前端            | Vue 3 + Vite + Pinia         | 前端工程 `frontend/`，通过 Vite 代理 `/api` 对接后端，提供沉浸式播放、发布、主页、私信等页面。 |
 | 可观测性        | pprof / healthz              | `GET /healthz` 健康检查；本地 pprof 默认 API `localhost:6060`、Worker `localhost:6061`。 |
 

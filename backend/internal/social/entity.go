@@ -1,6 +1,8 @@
 package social
 
-import "feedsystem_video_go/internal/account"
+import (
+	"feedsystem_video_go/internal/account"
+)
 
 type Social struct {
 	ID         uint `gorm:"primaryKey"`
@@ -9,15 +11,19 @@ type Social struct {
 }
 
 type FollowRequest struct {
-	VloggerID uint `json:"vlogger_id"`
+	VloggerID uint `json:"vlogger_id" binding:"required"`
 }
 
 type UnfollowRequest struct {
-	VloggerID uint `json:"vlogger_id"`
+	VloggerID uint `json:"vlogger_id" binding:"required"`
 }
 
 type GetAllFollowersRequest struct {
-	VloggerID uint `json:"vlogger_id"`
+	VloggerID uint `json:"vlogger_id" binding:"required"`
+}
+
+type GetAllVloggersRequest struct {
+	FollowerID uint `json:"follower_id" binding:"required"`
 }
 
 type GetAllFollowersResponse struct {
@@ -33,8 +39,4 @@ type GetAllVloggersResponse struct {
 type SocialCounts struct {
 	FollowerCount int64 `json:"follower_count"`
 	VloggerCount  int64 `json:"vlogger_count"`
-}
-
-type GetAllVloggersRequest struct {
-	FollowerID uint `json:"follower_id"`
 }

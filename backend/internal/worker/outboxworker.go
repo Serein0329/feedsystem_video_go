@@ -3,8 +3,8 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"feedsystem_video_go/internal/middleware/rabbitmq"
-	rediscache "feedsystem_video_go/internal/middleware/redis"
+	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
+	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/video"
 	"fmt"
 	"log"
@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func StartOutboxPoller(db *gorm.DB, tmq *rabbitmq.TimelineMQ) {
+func StartOutboxPoller(db *gorm.DB, tmq *rabbitmq2.TimelineMQ) {
 	if db == nil || tmq == nil {
 		log.Printf("Outbox poller disabled: timeline mq is not initialized")
 		return
@@ -46,7 +46,7 @@ func StartOutboxPoller(db *gorm.DB, tmq *rabbitmq.TimelineMQ) {
 	}()
 }
 
-func StartConsumer(tmq *rabbitmq.TimelineMQ, queueName string, redisClient *rediscache.Client, rmq *rabbitmq.RabbitMQ) {
+func StartConsumer(tmq *rabbitmq2.TimelineMQ, queueName string, redisClient *rediscache.Client, rmq *rabbitmq2.RabbitMQ) {
 	if tmq == nil || rmq == nil || rmq.Conn == nil {
 		log.Printf("Timeline consumer disabled: rabbitmq is not initialized")
 		return
@@ -81,7 +81,7 @@ func StartConsumer(tmq *rabbitmq.TimelineMQ, queueName string, redisClient *redi
 			log.Printf("Timeline consumer 已启动, queue=%s", queueName)
 
 			for msg := range msgs {
-				var event rabbitmq.TimelineEvent
+				var event rabbitmq2.TimelineEvent
 				if err := json.Unmarshal(msg.Body, &event); err != nil {
 					log.Printf("Timeline consumer: 反序列化失败: %v", err)
 					msg.Ack(false)

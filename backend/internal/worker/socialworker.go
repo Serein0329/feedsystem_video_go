@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"feedsystem_video_go/internal/middleware/rabbitmq"
+	"feedsystem_video_go/internal/db/rabbitmq"
 	"feedsystem_video_go/internal/social"
 	"log"
 	"time"

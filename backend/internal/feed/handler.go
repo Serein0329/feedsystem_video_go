@@ -1,8 +1,9 @@
 package feed
 
 import (
-	"feedsystem_video_go/internal/apierror"
-	"feedsystem_video_go/internal/middleware/jwt"
+	"feedsystem_video_go/internal/mw"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/response"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,7 @@ func NewFeedHandler(service *FeedService) *FeedHandler {
 func (f *FeedHandler) ListLatest(c *gin.Context) {
 	var req ListLatestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
@@ -29,17 +30,14 @@ func (f *FeedHandler) ListLatest(c *gin.Context) {
 	if req.LatestTime > 0 {
 		latestTime = time.UnixMilli(req.LatestTime)
 	}
-	viewerAccountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		viewerAccountID = 0
-	}
+	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 	feedItems, err := f.service.ListLatest(c.Request.Context(), req.Limit, latestTime, viewerAccountID)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	feedItems.VideoList = nonNilFeedVideoItems(feedItems.VideoList)
-	c.JSON(200, feedItems)
+	response.Success(c, feedItems)
 }
 
 func (f *FeedHandler) ListLikesCount(c *gin.Context) {
@@ -78,7 +76,7 @@ func (f *FeedHandler) ListLikesCount(c *gin.Context) {
 			}
 		}
 	}
-	viewerAccountID, err := jwt.GetAccountID(c)
+	viewerAccountID, err := mw.GetAccountIDByGIN(c)
 	if err != nil {
 		viewerAccountID = 0
 	}
@@ -100,7 +98,7 @@ func (f *FeedHandler) ListByFollowing(c *gin.Context) {
 	if req.Limit <= 0 || req.Limit > 50 {
 		req.Limit = 10
 	}
-	viewerAccountID, err := jwt.GetAccountID(c)
+	viewerAccountID, err := mw.GetAccountIDByGIN(c)
 	if err != nil {
 		viewerAccountID = 0
 	}
@@ -126,7 +124,7 @@ func (f *FeedHandler) ListByPopularity(c *gin.Context) {
 	if req.Limit <= 0 || req.Limit > 50 {
 		req.Limit = 10
 	}
-	viewerAccountID, err := jwt.GetAccountID(c)
+	viewerAccountID, err := mw.GetAccountIDByGIN(c)
 	if err != nil {
 		viewerAccountID = 0
 	}
@@ -191,7 +189,7 @@ func (h *FeedHandler) ListByTag(c *gin.Context) {
 	if req.Limit <= 0 || req.Limit > 50 {
 		req.Limit = 10
 	}
-	viewerAccountID, _ := jwt.GetAccountID(c)
+	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 	items, err := h.service.ListByTag(c.Request.Context(), req.TagName, req.Limit, viewerAccountID)
 	if err != nil {
 		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})

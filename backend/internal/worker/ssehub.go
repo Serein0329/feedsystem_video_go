@@ -3,13 +3,12 @@ package worker
 import (
 	"encoding/json"
 	"errors"
+	"feedsystem_video_go/internal/pkg/jwt"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"time"
-
-	"feedsystem_video_go/internal/auth"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -88,7 +87,7 @@ func (h *SSEHub) SSERequireAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 			return
 		}
-		claims, err := auth.ParseToken(token)
+		claims, err := jwt.ParseToken(token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return

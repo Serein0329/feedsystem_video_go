@@ -1,12 +1,14 @@
 server:
   port: 8080
+  read_timeout: 5s
+  write_timeout: 10s
 
 database:
   host: localhost
   port: 3307
   user: root
   password: 123456
-  dbname: feedsystem
+  dbname: feedsystem_video
 
 redis:
   host: localhost
@@ -18,7 +20,7 @@ rabbitmq:
   host: localhost
   port: 5672
   username: admin
-  password: password123
+  password: 123456
 
 observability:
   pprof:

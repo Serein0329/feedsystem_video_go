@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"feedsystem_video_go/internal/config"
-	"feedsystem_video_go/internal/db"
-	mqrabbit "feedsystem_video_go/internal/middleware/rabbitmq"
-	rediscache "feedsystem_video_go/internal/middleware/redis"
-	"feedsystem_video_go/internal/observability"
+	"feedsystem_video_go/internal/db/mysql"
+	mqrabbit "feedsystem_video_go/internal/db/rabbitmq"
+	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/http"
 	"feedsystem_video_go/internal/social"
 	"feedsystem_video_go/internal/video"
 	"feedsystem_video_go/internal/worker"
@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/joho/godotenv"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
 )
 
@@ -111,10 +111,10 @@ func main() {
 	var sqlDB *gorm.DB
 	connectWithRetry("MySQL", 10, func() error {
 		var err error
-		sqlDB, err = db.NewDB(cfg.Database)
+		sqlDB, err = mysql.NewDB(&cfg.Database)
 		return err
 	})
-	defer db.CloseDB(sqlDB)
+	defer mysql.CloseDB(sqlDB)
 
 	// 连接 Redis（用于流行度更新）
 	cache, err := rediscache.NewFromEnv(&cfg.Redis)
@@ -173,10 +173,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pprofServer, err := observability.NewPprofServer(
+	pprofServer, err := http.NewPprofServer(
 		"Worker",
-		cfg.ObservabilityConfig.Pprof.Enabled,
-		cfg.ObservabilityConfig.Pprof.WorkerAddr,
+		cfg.Pprof.Enabled,
+		cfg.Pprof.WorkerAddr,
 	)
 	if err != nil {
 		log.Printf("Failed to start worker pprof server: %v", err)

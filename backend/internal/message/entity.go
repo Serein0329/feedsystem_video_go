@@ -12,14 +12,10 @@ type Message struct {
 }
 
 type SendRequest struct {
-	ToID    uint   `json:"to_id"`
-	Content string `json:"content"`
+	ToID    uint   `json:"to_id" binding:"required"`
+	Content string `json:"content" binding:"required"`
 }
 
 type ListRequest struct {
-	PeerID uint `json:"peer_id"`
-}
-
-type ListResponse struct {
-	Messages []Message `json:"messages"`
+	PeerID uint `json:"peer_id" binding:"required"`
 }

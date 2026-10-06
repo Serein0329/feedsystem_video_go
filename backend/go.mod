@@ -16,7 +16,10 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-require github.com/yuin/gopher-lua v1.1.1 // indirect
+require (
+	github.com/lmittmann/tint v1.2.0 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
+)
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

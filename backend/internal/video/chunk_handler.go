@@ -4,22 +4,26 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"errors"
+	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/mw"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/randhex"
+	"feedsystem_video_go/internal/pkg/response"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	"feedsystem_video_go/internal/middleware/jwt"
-	rediscache "feedsystem_video_go/internal/middleware/redis"
-
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 const sessionTTL = 24 * time.Hour
 
 var errChunkCacheUnavailable = errors.New("chunk upload requires redis")
+var errChunkSessionNotFound = errors.New("session not found")
 
 type ChunkUploadHandler struct {
 	cache *rediscache.Client
@@ -43,7 +47,10 @@ func (h *ChunkUploadHandler) getSession(ctx *gin.Context, uploadID string) (*Chu
 	}
 	b, err := h.cache.GetBytes(ctx.Request.Context(), h.sessionKey(uploadID))
 	if err != nil {
-		return nil, fmt.Errorf("upload session not found")
+		if errors.Is(err, redis.Nil) {
+			return nil, errChunkSessionNotFound
+		}
+		return nil, err
 	}
 	var s ChunkUploadSession
 	if err := json.Unmarshal(b, &s); err != nil {
@@ -52,7 +59,7 @@ func (h *ChunkUploadHandler) getSession(ctx *gin.Context, uploadID string) (*Chu
 	return &s, nil
 }
 
-func (h *ChunkUploadHandler) saveSession(ctx *gin.Context, s *ChunkUploadSession) error {
+func (h *ChunkUploadHandler) setSession(ctx *gin.Context, s *ChunkUploadSession) error {
 	if h.cache == nil {
 		return errChunkCacheUnavailable
 	}
@@ -65,25 +72,29 @@ func (h *ChunkUploadHandler) saveSession(ctx *gin.Context, s *ChunkUploadSession
 
 func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 	if h.cache == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": errChunkCacheUnavailable.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(errChunkCacheUnavailable))
 		return
 	}
 
 	var req InitChunkUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"err": err.Error()})
 		return
 	}
 
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	accountID, _ := mw.GetAccountIDByGIN(c)
+
+	fileExt := strings.ToLower(filepath.Ext(req.Filename))
+	switch fileExt {
+	case ".mp4":
+	default:
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .mp4 allowed"})
 		return
 	}
 
 	const maxSize = 200 << 20
 	if req.FileSize > maxSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file size exceeds 200MB limit"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size exceeds 200MB limit"})
 		return
 	}
 
@@ -95,8 +106,8 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		if sessErr == nil {
 			// Refresh TTL on resume
 			_ = h.cache.SetBytes(c.Request.Context(), hashKey, existingID, sessionTTL)
-			_ = h.saveSession(c, session)
-			c.JSON(http.StatusOK, gin.H{
+			_ = h.setSession(c, session)
+			response.Success(c, gin.H{
 				"upload_id":       session.UploadID,
 				"uploaded_chunks": session.UploadedChunks(),
 			})
@@ -104,7 +115,11 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		}
 	}
 
-	id, _ := randHex(16)
+	id, err := randhex.New(16)
+	if err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		return
+	}
 	uploadID := id + fmt.Sprintf("%d", time.Now().UnixNano())
 	session := &ChunkUploadSession{
 		UploadID:     uploadID,
@@ -117,17 +132,17 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		UploadedBits: make([]bool, req.TotalChunks),
 	}
 
-	if err := h.saveSession(c, session); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+	if err := h.setSession(c, session); err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 
 	if err := h.cache.SetBytes(c.Request.Context(), hashKey, []byte(uploadID), sessionTTL); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.Success(c, gin.H{
 		"upload_id":       uploadID,
 		"uploaded_chunks": []int{},
 	})
@@ -135,129 +150,130 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 
 func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 	if h.cache == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": errChunkCacheUnavailable.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(errChunkCacheUnavailable))
 		return
 	}
 
 	var req UploadChunkRequest
 	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	session, err := h.getSession(c, req.UploadID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		if errors.Is(err, errChunkSessionNotFound) {
+			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		} else {
+			response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		}
 		return
 	}
 
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	accountID, _ := mw.GetAccountIDByGIN(c)
 	if session.AccountID != accountID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		response.FailByErrCode(c, apierror.ErrUnauthorized)
 		return
 	}
 
-	if req.ChunkIndex < 0 || req.ChunkIndex >= session.TotalChunks {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chunk_index"})
+	if req.ChunkIndex >= session.TotalChunks {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "chunk index out of range"})
 		return
 	}
 
 	if session.UploadedBits[req.ChunkIndex] {
-		c.JSON(http.StatusOK, gin.H{"chunk_index": req.ChunkIndex})
+		response.Success(c, gin.H{"chunk_index": req.ChunkIndex})
 		return
 	}
 
 	f, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
 		return
 	}
 
 	chunkFile, err := f.Open()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read chunk"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't open chunk: %v", err)))
 		return
 	}
 	defer chunkFile.Close()
 
 	hash := md5.New()
 	if _, err := io.Copy(hash, chunkFile); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash chunk"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't hash chunk: %v", err)))
 		return
 	}
 	actualHash := fmt.Sprintf("%x", hash.Sum(nil))
 
 	if actualHash != req.ChunkHash {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chunk hash mismatch", "expected": req.ChunkHash, "actual": actualHash})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "chunk hash mismatch", "expected": req.ChunkHash, "actual": actualHash})
 		return
 	}
 
 	tmpDir := filepath.Join(".run", "uploads", "tmp", req.UploadID)
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create temp dir"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create tmp dir: %v", err)))
 		return
 	}
 
 	chunkPath := filepath.Join(tmpDir, fmt.Sprintf("%d", req.ChunkIndex))
-	if _, seekErr := chunkFile.Seek(0, io.SeekStart); seekErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read chunk"})
+	// io.Copy(hash, chunkFile)已经让游标在文件末尾了
+	if _, err := chunkFile.Seek(0, io.SeekStart); err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't seek chunk: %v", err)))
 		return
 	}
 
 	dst, err := os.Create(chunkPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save chunk"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create chunk file: %v", err)))
 		return
 	}
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, chunkFile); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save chunk"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't save chunk: %v", err)))
 		return
 	}
 
 	session.UploadedBits[req.ChunkIndex] = true
-	if err := h.saveSession(c, session); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update session"})
+	if err := h.setSession(c, session); err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't update session: %v", err)))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"chunk_index": req.ChunkIndex})
+	response.Success(c, gin.H{"chunk_index": req.ChunkIndex})
 }
 
 func (h *ChunkUploadHandler) ChunkStatus(c *gin.Context) {
 	if h.cache == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": errChunkCacheUnavailable.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(errChunkCacheUnavailable))
 		return
 	}
 
 	var req ChunkStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	session, err := h.getSession(c, req.UploadID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		if errors.Is(err, errChunkSessionNotFound) {
+			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		} else {
+			response.FailWithDataByErrCode(c, apierror.ErrInternalServer, err)
+		}
 		return
 	}
 
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	accountID, _ := mw.GetAccountIDByGIN(c)
 	if session.AccountID != accountID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		response.FailByErrCode(c, apierror.ErrUnauthorized)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.Success(c, gin.H{
 		"upload_id":       session.UploadID,
 		"uploaded_chunks": session.UploadedChunks(),
 		"total_chunks":    session.TotalChunks,
@@ -266,29 +282,29 @@ func (h *ChunkUploadHandler) ChunkStatus(c *gin.Context) {
 
 func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	if h.cache == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": errChunkCacheUnavailable.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(errChunkCacheUnavailable))
 		return
 	}
 
 	var req CompleteChunkUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	session, err := h.getSession(c, req.UploadID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		if errors.Is(err, errChunkSessionNotFound) {
+			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		} else {
+			response.FailWithDataByErrCode(c, apierror.ErrInternalServer, err)
+		}
 		return
 	}
 
-	accountID, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	accountID, _ := mw.GetAccountIDByGIN(c)
 	if session.AccountID != accountID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		response.FailByErrCode(c, apierror.ErrUnauthorized)
 		return
 	}
 
@@ -297,16 +313,12 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 		for _, uploaded := range session.UploadedBits {
 			if !uploaded {
 				missing++
-				if missing > 5 {
-					missing = 5
-					break
-				}
 			}
 		}
-		c.JSON(http.StatusBadRequest, gin.H{
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{
 			"error":     "not all chunks uploaded",
 			"missing":   missing,
-			"completed": len(session.UploadedChunks()),
+			"completed": session.TotalChunks - missing,
 			"total":     session.TotalChunks,
 		})
 		return
@@ -317,20 +329,20 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	root := filepath.Join(".run", "uploads")
 	absDir := filepath.Join(root, relDir)
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create output dir"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create  dir: %v", err)))
 		return
 	}
 
-	filename, err := randHex(16)
+	filename, err := randhex.New(16)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate filename"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't generate filename: %v", err)))
 		return
 	}
 	finalPath := filepath.Join(absDir, filename+".mp4")
 
 	finalFile, err := os.Create(finalPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create final file"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create final file: %v", err)))
 		return
 	}
 	defer finalFile.Close()
@@ -340,21 +352,21 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 		chunkPath := filepath.Join(tmpDir, fmt.Sprintf("%d", i))
 		cf, err := os.Open(chunkPath)
 		if err != nil {
-			finalFile.Close()
-			os.Remove(finalPath)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("chunk %d missing", i)})
+			_ = finalFile.Close()
+			_ = os.Remove(finalPath)
+			response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't open chunk: %v", err)))
 			return
 		}
 		_, err = io.Copy(finalFile, cf)
-		cf.Close()
+		_ = cf.Close()
 		if err != nil {
-			finalFile.Close()
-			os.Remove(finalPath)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to merge chunks"})
+			_ = finalFile.Close()
+			_ = os.Remove(finalPath)
+			response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't merge chunk: %v", err)))
 			return
 		}
 	}
-	finalFile.Close()
+	_ = finalFile.Close()
 
 	// Clean up temp chunks
 	_ = os.RemoveAll(tmpDir)
@@ -366,8 +378,5 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	urlPath := fmt.Sprintf("/static/videos/%d/%s/%s.mp4", accountID, date, filename)
 	playURL := buildAbsoluteURL(c, urlPath)
 
-	c.JSON(http.StatusOK, gin.H{
-		"url":      playURL,
-		"play_url": playURL,
-	})
+	response.Success(c, gin.H{"play_url": playURL})
 }

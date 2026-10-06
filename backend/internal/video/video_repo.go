@@ -3,6 +3,7 @@ package video
 import (
 	"context"
 	"errors"
+	"feedsystem_video_go/internal/pkg/apierror"
 
 	"gorm.io/gorm"
 )
@@ -30,13 +31,10 @@ func (vr *VideoRepository) CreateMsg(ctx context.Context, Msg *OutboxMsg) error 
 }
 
 func (vr *VideoRepository) DeleteVideo(ctx context.Context, id uint) error {
-	if err := vr.db.WithContext(ctx).Delete(&Video{}, id).Error; err != nil {
-		return err
-	}
-	return nil
+	return vr.db.WithContext(ctx).Delete(&Video{}, id).Error
 }
 
-func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID int64) ([]Video, error) {
+func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID uint) ([]Video, error) {
 	var videos []Video
 	if err := vr.db.WithContext(ctx).
 		Where("author_id = ?", authorID).
@@ -51,29 +49,32 @@ func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID int64) (
 func (vr *VideoRepository) GetByID(ctx context.Context, id uint) (*Video, error) {
 	var video Video
 	if err := vr.db.WithContext(ctx).First(&video, id).Error; err != nil {
-		return (*Video)(nil), err
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apierror.ErrVideoNotFound
+		}
+		return nil, err
 	}
 	return &video, nil
 }
 
 func (vr *VideoRepository) UpdateLikesCount(ctx context.Context, id uint, likesCount int64) error {
-	if err := vr.db.WithContext(ctx).Model(&Video{}).
-		Where("id = ?", id).
-		Update("likes_count", likesCount).Error; err != nil {
+	var count int64
+	if err := vr.db.Model(&Video{}).Where("id = ?", id).Count(&count).Error; err != nil {
 		return err
 	}
-	return nil
+	if count == 0 {
+		return apierror.ErrVideoNotFound
+	}
+	return vr.db.Model(&Video{}).Where("id = ?", id).
+		Update("likes_count", likesCount).Error
 }
 
 func (vr *VideoRepository) IsExist(ctx context.Context, id uint) (bool, error) {
-	var video Video
-	if err := vr.db.WithContext(ctx).First(&video, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
-		}
+	var count int64
+	if err := vr.db.WithContext(ctx).Model(&Video{}).Where("id = ?", id).Count(&count).Error; err != nil {
 		return false, err
 	}
-	return true, nil
+	return count > 0, nil
 }
 
 func (vr *VideoRepository) UpdatePopularity(ctx context.Context, id uint, change int64) error {
@@ -113,7 +114,7 @@ func (vr *VideoRepository) CountByAuthor(ctx context.Context, authorID uint) (in
 
 func (vr *VideoRepository) TotalLikesByAuthor(ctx context.Context, authorID uint) (int64, error) {
 	var total int64
-	if err := vr.db.WithContext(ctx).Model(&Video{}).Where("author_id = ?", authorID).Select("COALESCE(SUM(likes_count), 0)").Scan(&total).Error; err != nil {
+	if err := vr.db.WithContext(ctx).Model(&Video{}).Select("COALESCE(SUM(likes_count), 0)").Where("author_id = ?", authorID).Scan(&total).Error; err != nil {
 		return 0, err
 	}
 	return total, nil

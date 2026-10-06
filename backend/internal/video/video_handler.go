@@ -1,19 +1,17 @@
 package video
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"feedsystem_video_go/internal/account"
+	"feedsystem_video_go/internal/mw"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/randhex"
+	"feedsystem_video_go/internal/pkg/response"
 	"fmt"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"feedsystem_video_go/internal/account"
-	"feedsystem_video_go/internal/apierror"
-	"feedsystem_video_go/internal/middleware/jwt"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,20 +28,12 @@ func NewVideoHandler(service *VideoService, accountService *account.AccountServi
 func (vh *VideoHandler) PublishVideo(c *gin.Context) {
 	var req PublishVideoRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	authorId, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	username, err := jwt.GetUsername(c)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
+	authorId, _ := mw.GetAccountIDByGIN(c)
+	username, _ := mw.GetUsernameByGIN(c)
 	video := &Video{
 		AuthorID:    authorId,
 		Username:    username,
@@ -54,34 +44,31 @@ func (vh *VideoHandler) PublishVideo(c *gin.Context) {
 		CreateTime:  time.Now(),
 	}
 	if err := vh.service.Publish(c.Request.Context(), video); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
+		response.FailByErr(c, err)
+	} else {
+		response.Success(c, video)
 	}
-	c.JSON(200, video)
+
 }
 
 func (vh *VideoHandler) UploadVideo(c *gin.Context) {
-	authorId, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	authorId, _ := mw.GetAccountIDByGIN(c)
 
 	f, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
 		return
 	}
 
 	const maxSize = 200 << 20
 	if f.Size <= 0 || f.Size > maxSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file size"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size must be between 0 and 200"})
 		return
 	}
 
 	ext := strings.ToLower(filepath.Ext(f.Filename))
 	if ext != ".mp4" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only .mp4 is allowed"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .mp4 is allowed"})
 		return
 	}
 
@@ -90,47 +77,40 @@ func (vh *VideoHandler) UploadVideo(c *gin.Context) {
 	root := filepath.Join(".run", "uploads")
 	absDir := filepath.Join(root, relDir)
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 
-	filename, err := randHex(16)
+	filename, err := randhex.New(16)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate filename"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	filename = filename + ext
 	absPath := filepath.Join(absDir, filename)
 
 	if err := c.SaveUploadedFile(f, absPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 
 	urlPath := path.Join("/static", "videos", fmt.Sprintf("%d", authorId), date, filename)
 
-	c.JSON(http.StatusOK, gin.H{
-		"url":      buildAbsoluteURL(c, urlPath),
-		"play_url": buildAbsoluteURL(c, urlPath),
-	})
+	response.Success(c, gin.H{"play_url": buildAbsoluteURL(c, urlPath)})
 }
 
 func (vh *VideoHandler) UploadCover(c *gin.Context) {
-	authorId, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	authorId, _ := mw.GetAccountIDByGIN(c)
 
 	f, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
 		return
 	}
 
 	const maxSize = 10 << 20
 	if f.Size <= 0 || f.Size > maxSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file size"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size must be between 0 and 1000"})
 		return
 	}
 
@@ -138,7 +118,7 @@ func (vh *VideoHandler) UploadCover(c *gin.Context) {
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".webp":
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only .jpg/.jpeg/.png/.webp is allowed"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .jpg/.jpeg/.webp allowed"})
 		return
 	}
 
@@ -147,37 +127,84 @@ func (vh *VideoHandler) UploadCover(c *gin.Context) {
 	root := filepath.Join(".run", "uploads")
 	absDir := filepath.Join(root, relDir)
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 
-	filename, err := randHex(16)
+	filename, err := randhex.New(16)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate filename"})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	filename = filename + ext
 	absPath := filepath.Join(absDir, filename)
 
 	if err := c.SaveUploadedFile(f, absPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 
 	urlPath := path.Join("/static", "covers", fmt.Sprintf("%d", authorId), date, filename)
 
-	c.JSON(http.StatusOK, gin.H{
-		"url":       buildAbsoluteURL(c, urlPath),
-		"cover_url": buildAbsoluteURL(c, urlPath),
-	})
+	response.Success(c, gin.H{"cover_url": buildAbsoluteURL(c, urlPath)})
 }
 
-func randHex(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("rand.Read: %w", err)
+func (vh *VideoHandler) DeleteVideo(c *gin.Context) {
+	var req DeleteVideoRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	return hex.EncodeToString(b), nil
+	authorId, _ := mw.GetAccountIDByGIN(c)
+	if err := vh.service.Delete(c.Request.Context(), req.ID, authorId); err != nil {
+		response.FailByErr(c, err)
+		return
+	}
+	response.Success(c, nil)
+}
+
+func (vh *VideoHandler) ListByAuthorID(c *gin.Context) {
+	var req ListByAuthorIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	videos, err := vh.service.ListByAuthorID(c.Request.Context(), req.AuthorID)
+	if err != nil {
+		response.FailByErr(c, err)
+		return
+	}
+	if videos == nil {
+		videos = []Video{}
+	}
+	response.Success(c, videos)
+}
+
+func (vh *VideoHandler) GetDetail(c *gin.Context) {
+	var req GetDetailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, err.Error())
+		return
+	}
+	video, err := vh.service.GetDetail(c.Request.Context(), req.ID)
+	if err != nil {
+		response.FailByErr(c, err)
+		return
+	}
+	response.Success(c, video)
+}
+
+func (vh *VideoHandler) UpdateLikesCount(c *gin.Context) {
+	var req UpdateLikesCountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		//c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	if err := vh.service.UpdateLikesCount(c.Request.Context(), req.ID, req.LikesCount); err != nil {
+		response.FailByErr(c, err)
+		return
+	}
+	response.Success(c, nil)
 }
 
 func buildAbsoluteURL(c *gin.Context, p string) string {
@@ -189,66 +216,4 @@ func buildAbsoluteURL(c *gin.Context, p string) string {
 		scheme = xf
 	}
 	return fmt.Sprintf("%s://%s%s", scheme, c.Request.Host, p)
-}
-
-func (vh *VideoHandler) DeleteVideo(c *gin.Context) {
-	var req DeleteVideoRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	authorId, err := jwt.GetAccountID(c)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	if err := vh.service.Delete(c.Request.Context(), req.ID, authorId); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"message": "video deleted"})
-}
-
-func (vh *VideoHandler) ListByAuthorID(c *gin.Context) {
-	var req ListByAuthorIDRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	videos, err := vh.service.ListByAuthorID(c.Request.Context(), req.AuthorID)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	if videos == nil {
-		videos = []Video{}
-	}
-	c.JSON(200, videos)
-}
-
-func (vh *VideoHandler) GetDetail(c *gin.Context) {
-	var req GetDetailRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	video, err := vh.service.GetDetail(c.Request.Context(), req.ID)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(200, video)
-}
-
-func (vh *VideoHandler) UpdateLikesCount(c *gin.Context) {
-	var req UpdateLikesCountRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	if err := vh.service.UpdateLikesCount(c.Request.Context(), req.ID, req.LikesCount); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"message": "likes count updated"})
 }

@@ -12,14 +12,14 @@ type Comment struct {
 }
 
 type PublishCommentRequest struct {
-	VideoID uint   `json:"video_id"`
-	Content string `json:"content"`
+	VideoID uint   `json:"video_id" binding:"required"`
+	Content string `json:"content" binding:"required"`
 }
 
 type DeleteCommentRequest struct {
-	CommentID uint `json:"comment_id"`
+	CommentID uint `json:"comment_id" binding:"required"`
 }
 
 type GetAllCommentsRequest struct {
-	VideoID uint `json:"video_id"`
+	VideoID uint `json:"video_id" binding:"required"`
 }

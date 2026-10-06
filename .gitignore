@@ -3,6 +3,8 @@ backend/.run/
 data/
 .sisyphus/
 docs/
+test
+.claude
 
 #
 # Binaries for programs and plugins

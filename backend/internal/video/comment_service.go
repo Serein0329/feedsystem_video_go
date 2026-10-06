@@ -2,10 +2,11 @@ package video
 
 import (
 	"context"
-	"errors"
-	"feedsystem_video_go/internal/apierror"
-	"feedsystem_video_go/internal/middleware/rabbitmq"
-	rediscache "feedsystem_video_go/internal/middleware/redis"
+	"feedsystem_video_go/internal/account"
+	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
+	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/notification"
+	"feedsystem_video_go/internal/pkg/apierror"
 	"log"
 	"regexp"
 	"strings"
@@ -17,33 +18,23 @@ type CommentService struct {
 	repo            *CommentRepository
 	VideoRepository *VideoRepository
 	cache           *rediscache.Client
-	commentMQ       *rabbitmq.CommentMQ
-	popularityMQ    *rabbitmq.PopularityMQ
+	commentMQ       *rabbitmq2.CommentMQ
+	popularityMQ    *rabbitmq2.PopularityMQ
 }
 
-func NewCommentService(repo *CommentRepository, videoRepo *VideoRepository, cache *rediscache.Client, commentMQ *rabbitmq.CommentMQ, popularityMQ *rabbitmq.PopularityMQ) *CommentService {
+func NewCommentService(repo *CommentRepository, videoRepo *VideoRepository, cache *rediscache.Client, commentMQ *rabbitmq2.CommentMQ, popularityMQ *rabbitmq2.PopularityMQ) *CommentService {
 	return &CommentService{repo: repo, VideoRepository: videoRepo, cache: cache, commentMQ: commentMQ, popularityMQ: popularityMQ}
 }
 
 func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
-	if comment == nil {
-		return errors.New("comment is nil")
-	}
-	comment.Username = strings.TrimSpace(comment.Username)
 	comment.Content = strings.TrimSpace(comment.Content)
-	if comment.VideoID == 0 || comment.AuthorID == 0 {
-		return errors.New("video_id and author_id are required")
-	}
-	if comment.Content == "" {
-		return errors.New("content is required")
-	}
 
 	exists, err := s.VideoRepository.IsExist(ctx, comment.VideoID)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return errors.New("video not found")
+		return apierror.ErrVideoNotFound
 	}
 
 	mysqlEnqueued := false
@@ -63,14 +54,14 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 		return nil
 	}
 
-	// Fallback: direct MySQL write when comment MQ publish fails.
 	if !mysqlEnqueued {
 		if err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Select("id").First(&Video{}, comment.VideoID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errors.New("video not found")
-				}
+			var count int64
+			if err := tx.Model(&Video{}).Where("id = ?", comment.VideoID).Count(&count).Error; err != nil {
 				return err
+			}
+			if count == 0 {
+				return apierror.ErrVideoNotFound
 			}
 			if err := tx.Create(comment).Error; err != nil {
 				return err
@@ -82,7 +73,6 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 		}
 	}
 
-	// Fallback: direct Redis update when popularity MQ publish fails.
 	if !redisEnqueued {
 		UpdatePopularityCache(ctx, s.cache, comment.VideoID, 1)
 	}
@@ -95,18 +85,15 @@ func (s *CommentService) Delete(ctx context.Context, commentID uint, accountID u
 	if err != nil {
 		return err
 	}
-	if comment == nil {
-		return errors.New("comment not found")
-	}
 	if comment.AuthorID != accountID {
-		return apierror.ErrUnauthorized
+		return apierror.ErrForbidden
 	}
 	if s.commentMQ != nil {
 		if err := s.commentMQ.Delete(ctx, commentID); err == nil {
 			return nil
 		}
 	}
-	return s.repo.DeleteComment(ctx, comment)
+	return s.repo.DeleteComment(ctx, commentID)
 }
 
 func (s *CommentService) GetAll(ctx context.Context, videoID uint) ([]Comment, error) {
@@ -115,14 +102,13 @@ func (s *CommentService) GetAll(ctx context.Context, videoID uint) ([]Comment, e
 		return nil, err
 	}
 	if !exists {
-		return nil, errors.New("video not found")
+		return nil, apierror.ErrVideoNotFound
 	}
 	return s.repo.GetAllComments(ctx, videoID)
 }
 
-var mentionRegex = regexp.MustCompile(`@(\w+)`)
-
 func (s *CommentService) notifyMentions(ctx context.Context, comment *Comment) {
+	var mentionRegex = regexp.MustCompile(`@(\w+)`)
 	matches := mentionRegex.FindAllStringSubmatch(comment.Content, -1)
 	if len(matches) == 0 {
 		return
@@ -135,23 +121,17 @@ func (s *CommentService) notifyMentions(ctx context.Context, comment *Comment) {
 		}
 		seen[username] = true
 		var accID uint
-		if err := s.repo.db.WithContext(ctx).Table("accounts").Where("username = ?", username).Select("id").Scan(&accID).Error; err != nil || accID == 0 {
+		if err := s.repo.db.WithContext(ctx).Model(account.Account{}).Select("id").Where("username = ?", username).Scan(&accID).Error; err != nil || accID == 0 {
 			continue
 		}
-		notif := struct {
-			RecipientID uint
-			SenderID    uint
-			Type        string
-			TargetID    uint
-			Content     string
-		}{
+		notif := notification.Notification{
 			RecipientID: accID,
 			SenderID:    comment.AuthorID,
 			Type:        "mention",
 			TargetID:    comment.VideoID,
 			Content:     comment.Username + " 在评论中提到了你",
 		}
-		if err := s.repo.db.WithContext(ctx).Table("notifications").Create(&notif).Error; err != nil {
+		if err := s.repo.db.WithContext(ctx).Create(&notif).Error; err != nil {
 			log.Printf("create mention notification failed: %v", err)
 		}
 	}
