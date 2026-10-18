@@ -98,8 +98,8 @@ func (ar *AccountRepository) UpdateToken(ctx context.Context, id uint, token str
 	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("token", token).Error
 }
 
-func (ar *AccountRepository) UpdateFields(ctx context.Context, id uint, updates map[string]any) error {
-	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(updates).Error
+func (ar *AccountRepository) UpdateBio(ctx context.Context, id uint, bio string) error {
+	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("bio", bio).Error
 }
 
 func (ar *AccountRepository) FindAll(ctx context.Context) ([]*Account, error) {

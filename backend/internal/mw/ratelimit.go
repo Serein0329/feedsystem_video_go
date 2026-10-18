@@ -2,8 +2,9 @@ package mw
 
 import (
 	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/response"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -36,9 +37,8 @@ func LimitHandler(
 			return
 		}
 		if count > maxRequests {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "too many requests",
-			})
+			response.FailByErrCode(c, apierror.ErrTooManyRequest)
+			c.Abort()
 			return
 		}
 		c.Next()
