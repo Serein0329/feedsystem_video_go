@@ -37,9 +37,8 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required,min=8,max=20"`
 }
 
-type UpdateProfileRequest struct {
-	AvatarURL string `json:"avatar_url" binding:"omitempty,url"`
-	Bio       string `json:"bio"`
+type UpdateBioRequest struct {
+	Bio string `json:"bio"`
 }
 
 type RefreshRequest struct {

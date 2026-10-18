@@ -160,15 +160,12 @@ func (as *AccountService) UpdateAvatar(ctx context.Context, accountID uint, avat
 	return as.accountRepository.UpdateAvatar(ctx, accountID, avatarURL)
 }
 
-func (as *AccountService) FindAll(ctx context.Context) ([]*Account, error) {
-	return as.accountRepository.FindAll(ctx)
+func (as *AccountService) UpdateBio(ctx context.Context, accountID uint, bio string) error {
+	return as.accountRepository.UpdateBio(ctx, accountID, strings.TrimSpace(bio))
 }
 
-func (as *AccountService) UpdateProfile(ctx context.Context, accountID uint, req *UpdateProfileRequest) error {
-	updates := map[string]any{}
-	updates["bio"] = strings.TrimSpace(req.Bio)
-	updates["avatar_url"] = strings.TrimSpace(req.AvatarURL)
-	return as.accountRepository.UpdateFields(ctx, accountID, updates)
+func (as *AccountService) IsExist(ctx context.Context, accountID uint) (bool, error) {
+	return as.accountRepository.IsExist(ctx, accountID)
 }
 
 func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, username, refreshToken string) (string, error) {

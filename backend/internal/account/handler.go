@@ -166,14 +166,14 @@ func (h *AccountHandler) UploadAvatar(c *gin.Context) {
 	response.Success(c, gin.H{"avatar_url": avatarURL})
 }
 
-func (h *AccountHandler) UpdateProfile(c *gin.Context) {
-	var req UpdateProfileRequest
+func (h *AccountHandler) UpdateBio(c *gin.Context) {
+	var req UpdateBioRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	accountID, _ := getAccountIDByGIN(c)
-	if err := h.accountService.UpdateProfile(c.Request.Context(), accountID, &req); err != nil {
+	if err := h.accountService.UpdateBio(c.Request.Context(), accountID, req.Bio); err != nil {
 		response.FailByErr(c, err)
 		return
 	}
