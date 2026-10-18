@@ -1,9 +1,11 @@
-package worker
+package sse
 
 import (
 	"encoding/json"
 	"errors"
-	"feedsystem_video_go/internal/pkg/jwt"
+	"feedsystem_video_go/internal/mw"
+	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/response"
 	"fmt"
 	"io"
 	"net/http"
@@ -65,44 +67,8 @@ func (h *SSEHub) Unsubscribe(userID uint, ch chan *Notification) {
 	}
 }
 
-func sseAccountID(c *gin.Context) (uint, bool) {
-	accountID, ok := c.Get("accountID")
-	if !ok {
-		return 0, false
-	}
-	userID, ok := accountID.(uint)
-	return userID, ok && userID != 0
-}
-
-func (h *SSEHub) SSERequireAuth() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		token := c.Query("token")
-		if token == "" {
-			token = c.GetHeader("Authorization")
-			if len(token) > 7 && token[:7] == "Bearer " {
-				token = token[7:]
-			}
-		}
-		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
-			return
-		}
-		claims, err := jwt.ParseToken(token)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-			return
-		}
-		c.Set("accountID", claims.AccountID)
-		c.Next()
-	}
-}
-
 func (h *SSEHub) SSEHandler(c *gin.Context) {
-	userID, ok := sseAccountID(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid account"})
-		return
-	}
+	userID, _ := mw.GetAccountIDByGIN(c)
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -112,24 +78,25 @@ func (h *SSEHub) SSEHandler(c *gin.Context) {
 	ch := h.Subscribe(userID)
 	defer h.Unsubscribe(userID, ch)
 
-	ctx := c.Request.Context()
 	flusher, _ := c.Writer.(http.Flusher)
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-c.Request.Context().Done():
 			return
 		case n, ok := <-ch:
 			if !ok {
 				return
 			}
-			b, _ := json.Marshal(n)
-			fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+			b, err := json.Marshal(n)
+			if err == nil {
+				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+			}
 			if flusher != nil {
 				flusher.Flush()
 			}
 		case <-time.After(30 * time.Second):
-			fmt.Fprintf(c.Writer, ": keepalive\n\n")
+			_, _ = fmt.Fprintf(c.Writer, ": keepalive\n\n")
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -138,39 +105,31 @@ func (h *SSEHub) SSEHandler(c *gin.Context) {
 }
 
 func (h *SSEHub) ListHandler(c *gin.Context) {
-	userID, ok := sseAccountID(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid account"})
-		return
-	}
-
+	userID, _ := mw.GetAccountIDByGIN(c)
 	var notifications []Notification
 	if err := h.db.WithContext(c.Request.Context()).
 		Where("recipient_id = ?", userID).
 		Order("created_at desc").
 		Limit(50).
 		Find(&notifications).Error; err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	if notifications == nil {
 		notifications = []Notification{}
 	}
-	c.JSON(200, gin.H{"notifications": notifications})
+	response.Success(c, gin.H{"notifications": notifications})
 }
 
 func (h *SSEHub) MarkReadHandler(c *gin.Context) {
-	userID, ok := sseAccountID(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid account"})
-		return
-	}
+	userID, _ := mw.GetAccountIDByGIN(c)
 
 	var req struct {
-		ID *uint `json:"id"`
+		ID *uint `json:"id" binding:"omitempty,min=1"`
 	}
+	//!errors.Is(err, io.EOF)可以让不输入请求体的请求通过
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -181,32 +140,19 @@ func (h *SSEHub) MarkReadHandler(c *gin.Context) {
 		err = h.db.WithContext(c.Request.Context()).Model(&Notification{}).Where("recipient_id = ?", userID).Update("is_read", true).Error
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-	c.JSON(200, gin.H{"message": "ok"})
+	response.Success(c, nil)
 }
 
 func (h *SSEHub) UnreadCountHandler(c *gin.Context) {
-	userID, ok := sseAccountID(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid account"})
-		return
-	}
+	userID, _ := mw.GetAccountIDByGIN(c)
 
 	var count int64
 	if err := h.db.WithContext(c.Request.Context()).Model(&Notification{}).Where("recipient_id = ? AND is_read = ?", userID, false).Count(&count).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-	c.JSON(200, gin.H{"count": count})
+	response.Success(c, gin.H{"count": count})
 }
-
-func (h *SSEHub) RegisterRoutes(r *gin.Engine, group *gin.RouterGroup) {
-	group.GET("/stream", h.SSEHandler)
-	group.POST("/list", h.ListHandler)
-	group.POST("/markRead", h.MarkReadHandler)
-	group.POST("/unreadCount", h.UnreadCountHandler)
-}
-
-var _ NotificationHub = (*SSEHub)(nil)

@@ -5,8 +5,8 @@ import (
 	"feedsystem_video_go/internal/account"
 	"feedsystem_video_go/internal/config"
 	"feedsystem_video_go/internal/message"
-	"feedsystem_video_go/internal/notification"
 	"feedsystem_video_go/internal/social"
+	"feedsystem_video_go/internal/sse"
 	"feedsystem_video_go/internal/video"
 	"time"
 
@@ -37,7 +37,7 @@ func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&account.Account{}, &video.Video{}, &video.Like{}, &video.Comment{},
 		&social.Social{}, &video.OutboxMsg{}, &video.Tag{}, &video.VideoTag{},
-		&message.Message{}, &notification.Notification{},
+		&message.Message{}, &sse.Notification{},
 	)
 }
 

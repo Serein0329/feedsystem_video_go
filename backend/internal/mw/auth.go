@@ -7,8 +7,9 @@ import (
 	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/pkg/apierror"
 	"feedsystem_video_go/internal/pkg/jwt"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/pkg/response"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -45,7 +46,6 @@ func JWTAuthHandler(repo *account.AccountRepository, cache *rediscache.Client, i
 		}
 
 		key := cache.Key("account:%d:access", claims.AccountID)
-		// 先查 Redis
 		if cache != nil {
 			cacheCtx, cancel := context.WithTimeout(c.Request.Context(), 50*time.Millisecond)
 			defer cancel()
@@ -77,12 +77,37 @@ func JWTAuthHandler(repo *account.AccountRepository, cache *rediscache.Client, i
 			defer cancel()
 
 			if err := cache.SetBytes(cacheCtx, key, []byte(tokenString), 24*time.Hour); err != nil {
-				log.Printf("failed to set cache: %v", err)
+				logger.Info("Set cache failed", slog.String("key", key), slog.Any("error", err))
 			}
 		}
 
 		c.Set("accountID", claims.AccountID)
 		c.Set("username", claims.Username)
+		c.Next()
+	}
+}
+
+func SSEAuthHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.Query("token")
+		if token == "" {
+			token = c.GetHeader("Authorization")
+			if len(token) > 7 && token[:7] == "Bearer " {
+				token = token[7:]
+			}
+		}
+		if token == "" {
+			response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "missing token"})
+			c.Abort()
+			return
+		}
+		claims, err := jwt.ParseToken(token)
+		if err != nil {
+			response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "invalid or expired token"})
+			c.Abort()
+			return
+		}
+		c.Set("accountID", claims.AccountID)
 		c.Next()
 	}
 }

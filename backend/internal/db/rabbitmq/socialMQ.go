@@ -69,7 +69,7 @@ func (s *SocialMQ) publish(ctx context.Context, action, routingKey string, follo
 		Action:     action,
 		FollowerID: followerID,
 		VloggerID:  vloggerID,
-		OccurredAt: time.Now().UTC(),
+		OccurredAt: time.Now(),
 	}
 	return PublishJSON(ctx, s.ch, socialExchange, routingKey, evt)
 }

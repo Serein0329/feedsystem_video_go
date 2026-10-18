@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"feedsystem_video_go/internal/account"
-	"feedsystem_video_go/internal/pkg/apierror"
 
 	"gorm.io/gorm"
 )
@@ -20,7 +19,7 @@ func NewSocialRepository(db *gorm.DB) *SocialRepository {
 func (r *SocialRepository) Follow(ctx context.Context, social *Social) error {
 	if err := r.db.WithContext(ctx).Create(social).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return apierror.ErrSocialeExist
+			return nil
 		}
 		return err
 	}

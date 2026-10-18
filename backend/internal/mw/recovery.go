@@ -2,9 +2,9 @@ package mw
 
 import (
 	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/pkg/response"
 	"fmt"
-	"log/slog"
 	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
@@ -21,7 +21,7 @@ func RecoveryHandler() gin.HandlerFunc {
 					c.Request.Method,
 					r,
 					string(debug.Stack()))
-				slog.Info(msg)
+				logger.Info(msg)
 				response.FailByErrCode(c, apierror.ErrInternalServer)
 				c.Abort()
 			}

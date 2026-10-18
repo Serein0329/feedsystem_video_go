@@ -1,6 +1,7 @@
 package mw
 
 import (
+	"feedsystem_video_go/internal/pkg/logger"
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
@@ -23,11 +24,11 @@ func LoggerHandler() gin.HandlerFunc {
 		n := c.Writer.Status()
 		switch {
 		case n >= 500:
-			slog.LogAttrs(c.Request.Context(), slog.LevelError, "[GIN ServerError]", attrs...)
+			logger.Error("[GIN ServerError]", attrs...)
 		case n >= 400:
-			slog.LogAttrs(c.Request.Context(), slog.LevelWarn, "[GIN ClientError]", attrs...)
+			logger.Warn("[GIN ClientError]", attrs...)
 		default:
-			slog.LogAttrs(c.Request.Context(), slog.LevelInfo, "[GIN Success]", attrs...)
+			logger.Info("[GIN Success]", attrs...)
 		}
 	}
 }

@@ -24,7 +24,7 @@ func NewLikeWorker(ch *amqp.Channel, likes *video.LikeRepository, videos *video.
 }
 
 func (w *LikeWorker) Run(ctx context.Context) error {
-	if w == nil || w.ch == nil || w.likes == nil || w.videos == nil {
+	if w == nil || w.ch == nil {
 		return errors.New("like worker is not initialized")
 	}
 	if w.queue == "" {
@@ -72,7 +72,7 @@ func (w *LikeWorker) handleDelivery(ctx context.Context, d amqp.Delivery) {
 				_ = d.Ack(false)
 				return
 			}
-			wait := time.Duration(1<<uint(i)) * time.Second
+			wait := time.Duration(1<<i) * time.Second
 			log.Printf("like worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
 			time.Sleep(wait)
 			continue
@@ -103,26 +103,12 @@ func (w *LikeWorker) process(ctx context.Context, body []byte) error {
 }
 
 func (w *LikeWorker) applyLike(ctx context.Context, userID, videoID uint) error {
-	ok, err := w.videos.IsExist(ctx, videoID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return nil
-	}
-
-	created, err := w.likes.LikeIgnoreDuplicate(ctx, &video.Like{
+	if err := w.likes.Like(ctx, &video.Like{
 		VideoID:   videoID,
 		AccountID: userID,
-		CreatedAt: time.Now(),
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	if !created {
-		return nil
-	}
-
 	if err := w.videos.ChangeLikesCount(ctx, videoID, 1); err != nil {
 		return err
 	}
@@ -130,22 +116,9 @@ func (w *LikeWorker) applyLike(ctx context.Context, userID, videoID uint) error 
 }
 
 func (w *LikeWorker) applyUnlike(ctx context.Context, userID, videoID uint) error {
-	ok, err := w.videos.IsExist(ctx, videoID)
-	if err != nil {
+	if err := w.likes.Unlike(ctx, &video.Like{AccountID: userID, VideoID: videoID}); err != nil {
 		return err
 	}
-	if !ok {
-		return nil
-	}
-
-	deleted, err := w.likes.DeleteByVideoAndAccount(ctx, videoID, userID)
-	if err != nil {
-		return err
-	}
-	if !deleted {
-		return nil
-	}
-
 	if err := w.videos.ChangeLikesCount(ctx, videoID, -1); err != nil {
 		return err
 	}

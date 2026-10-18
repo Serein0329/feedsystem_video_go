@@ -20,17 +20,19 @@ const (
 
 	commentPublishRK = "comment.publish"
 	commentDeleteRK  = "comment.delete"
+	commentMentionRK = "comment.mention"
 )
 
 type CommentEvent struct {
-	EventID    string    `json:"event_id"`
-	Action     string    `json:"action"`
-	CommentID  uint      `json:"comment_id,omitempty"`
-	Username   string    `json:"username,omitempty"`
-	VideoID    uint      `json:"video_id,omitempty"`
-	AuthorID   uint      `json:"author_id,omitempty"`
-	Content    string    `json:"content,omitempty"`
-	OccurredAt time.Time `json:"occurred_at"`
+	EventID      string    `json:"event_id"`
+	Action       string    `json:"action"`
+	CommentID    uint      `json:"comment_id,omitempty"`
+	Username     string    `json:"username,omitempty"`
+	VideoID      uint      `json:"video_id,omitempty"`
+	AuthorID     uint      `json:"author_id,omitempty"`
+	Content      string    `json:"content,omitempty"`
+	MentionedIDs []uint    `json:"mentioned_ids,omitempty"`
+	OccurredAt   time.Time `json:"occurred_at"`
 }
 
 func NewCommentMQ(base *RabbitMQ) (*CommentMQ, error) {
@@ -63,6 +65,15 @@ func (c *CommentMQ) Delete(ctx context.Context, commentID uint) error {
 	})
 }
 
+func (c *CommentMQ) Mention(ctx context.Context, username string, videoID, authorID uint, mentionedIDs []uint) error {
+	return c.publish(ctx, "mention", commentMentionRK, CommentEvent{
+		Username:     username,
+		VideoID:      videoID,
+		AuthorID:     authorID,
+		MentionedIDs: mentionedIDs,
+	})
+}
+
 func (c *CommentMQ) publish(ctx context.Context, action, routingKey string, evt CommentEvent) error {
 	if c == nil || c.ch == nil {
 		return errors.New("comment mq is not initialized")
@@ -73,6 +84,6 @@ func (c *CommentMQ) publish(ctx context.Context, action, routingKey string, evt 
 	}
 	evt.EventID = id
 	evt.Action = action
-	evt.OccurredAt = time.Now().UTC()
+	evt.OccurredAt = time.Now()
 	return PublishJSON(ctx, c.ch, commentExchange, routingKey, evt)
 }

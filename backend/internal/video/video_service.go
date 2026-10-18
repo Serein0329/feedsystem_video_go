@@ -76,7 +76,7 @@ func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) erro
 		return err
 	}
 	if vs.cache != nil {
-		cacheKey := vs.cache.Key("video:detail:id=%d", id)
+		cacheKey := vs.cache.Key("video:%d", id)
 		if err = vs.cache.Del(context.Background(), cacheKey); err != nil {
 			log.Printf("failed to delete cache key:%s, err:%v", cacheKey, err)
 		}
@@ -93,7 +93,7 @@ func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID uint) ([]Vi
 }
 
 func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) {
-	cacheKey := vs.cache.Key("video:detail:id=%d", id)
+	cacheKey := vs.cache.Key("video:%d", id)
 
 	getCached := func() (*Video, error) {
 		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
@@ -147,7 +147,7 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 			}
 
 			// 没拿到锁：等待别人回填缓存
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -190,7 +190,7 @@ func (vs *VideoService) UpdatePopularity(ctx context.Context, id uint, change in
 
 	if vs.cache != nil {
 		// 1) 详情缓存：直接失效（最简单靠谱）
-		_ = vs.cache.Del(context.Background(), vs.cache.Key("video:detail:id=%d", id))
+		_ = vs.cache.Del(context.Background(), vs.cache.Key("video:%d", id))
 
 		// 2) 热榜：写到“时间窗ZSET”，不要用 detail key
 		now := time.Now().UTC().Truncate(time.Minute)

@@ -7,14 +7,13 @@ import (
 	"time"
 )
 
-// 更新视频流行度缓存
+// UpdatePopularityCache 更新视频流行度缓存
 func UpdatePopularityCache(ctx context.Context, cache *rediscache.Client, id uint, change int64) {
 	if cache == nil || id == 0 || change == 0 {
 		return
 	}
 
-	_ = cache.Del(context.Background(), cache.Key("video:detail:id=%d", id))
-	_ = cache.Del(context.Background(), cache.Key("video:entity:%d", id))
+	_ = cache.Del(ctx, cache.Key("video:%d", id))
 
 	now := time.Now()
 	windowKey := cache.Key("hot:video:1m:%s", now.Format("200601021504"))

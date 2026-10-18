@@ -6,7 +6,8 @@ import (
 	"feedsystem_video_go/internal/pkg/apierror"
 	"feedsystem_video_go/internal/pkg/hash"
 	"feedsystem_video_go/internal/pkg/jwt"
-	"log"
+	"feedsystem_video_go/internal/pkg/logger"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -20,41 +21,52 @@ func NewAccountService(accountRepository *AccountRepository, cache *rediscache.C
 	return &AccountService{accountRepository: accountRepository, cache: cache}
 }
 
-func (as *AccountService) CreateAccount(ctx context.Context, account *Account) error {
-	passwordHash, err := hash.HashPassword(account.Password)
+func (as *AccountService) CreateAccount(ctx context.Context, username, password string) error {
+	passwordHash, err := hash.HashPassword(password)
 	if err != nil {
 		return err
 	}
-	account.Password = passwordHash
-	if err := as.accountRepository.CreateAccount(ctx, account); err != nil {
+	password = passwordHash
+	if err := as.accountRepository.CreateAccount(ctx, username, password); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (as *AccountService) Rename(ctx context.Context, accountID uint, newUsername string) (string, error) {
+func (as *AccountService) Rename(ctx context.Context, accountID uint, newUsername string) (RenameResponse, error) {
 	token, err := jwt.GenerateToken(accountID, newUsername)
 	if err != nil {
-		return "", err
+		return RenameResponse{}, err
+	}
+	refreshToken, err := jwt.GenerateRefreshToken(accountID, newUsername)
+	if err != nil {
+		return RenameResponse{}, err
 	}
 
-	if err := as.accountRepository.RenameWithToken(ctx, accountID, newUsername, token); err != nil {
-		return "", err
+	if err := as.accountRepository.Rename(ctx, accountID, newUsername, token, refreshToken); err != nil {
+		return RenameResponse{}, err
 	}
 	if as.cache != nil {
 		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 
-		key := as.cache.Key("account:%d:access", accountID)
-		if err := as.cache.SetBytes(cacheCtx, key, []byte(token), 24*time.Hour); err != nil {
-			log.Printf("failed to set cache key:%s, err:%v", key, err)
+		accessKey := as.cache.Key("account:%d:access", accountID)
+		refreshKey := as.cache.Key("account:%d:refresh", accountID)
+		if err := as.cache.SetBytes(cacheCtx, accessKey, []byte(token), 24*time.Hour); err != nil {
+			logger.Info("Set cache failed", slog.String("key", accessKey), slog.Any("error", err))
+		}
+		if err := as.cache.SetBytes(cacheCtx, refreshKey, []byte(refreshToken), 7*24*time.Hour); err != nil {
+			logger.Info("Set cache failed", slog.String("key", refreshKey), slog.Any("error", err))
 		}
 	}
-	return token, nil
+	return RenameResponse{
+		Token:        token,
+		RefreshToken: refreshToken,
+	}, nil
 }
 
 func (as *AccountService) ChangePassword(ctx context.Context, id uint, oldPassword, newPassword string) error {
-	account, err := as.FindByID(ctx, id)
+	account, err := as.accountRepository.FindByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -75,39 +87,31 @@ func (as *AccountService) ChangePassword(ctx context.Context, id uint, oldPasswo
 }
 
 func (as *AccountService) FindByID(ctx context.Context, id uint) (*Account, error) {
-	if account, err := as.accountRepository.FindByID(ctx, id); err != nil {
-		return nil, err
-	} else {
-		return account, nil
-	}
+	return as.accountRepository.FindByID(ctx, id)
 }
 
 func (as *AccountService) FindByUsername(ctx context.Context, username string) (*Account, error) {
-	if account, err := as.accountRepository.FindByUsername(ctx, username); err != nil {
-		return nil, err
-	} else {
-		return account, nil
-	}
+	return as.accountRepository.FindByUsername(ctx, username)
 }
 
-func (as *AccountService) Login(ctx context.Context, username, password string) (string, string, error) {
-	account, err := as.FindByUsername(ctx, username)
+func (as *AccountService) Login(ctx context.Context, username, password string) (LoginResponse, error) {
+	account, err := as.accountRepository.FindByUsername(ctx, username)
 	if err != nil {
-		return "", "", err
+		return LoginResponse{}, err
 	}
 	if !hash.ComparePassword(account.Password, password) {
-		return "", "", apierror.ErrUserPasswordWrong
+		return LoginResponse{}, apierror.ErrUserPasswordWrong
 	}
 	accessToken, err := jwt.GenerateToken(account.ID, account.Username)
 	if err != nil {
-		return "", "", err
+		return LoginResponse{}, err
 	}
 	refreshToken, err := jwt.GenerateRefreshToken(account.ID, account.Username)
 	if err != nil {
-		return "", "", err
+		return LoginResponse{}, err
 	}
 	if err := as.accountRepository.Login(ctx, account.ID, accessToken, refreshToken); err != nil {
-		return "", "", err
+		return LoginResponse{}, err
 	}
 	if as.cache != nil {
 		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
@@ -116,13 +120,16 @@ func (as *AccountService) Login(ctx context.Context, username, password string) 
 		accessKey := as.cache.Key("account:%d:access", account.ID)
 		refreshKey := as.cache.Key("account:%d:refresh", account.ID)
 		if err := as.cache.SetBytes(cacheCtx, accessKey, []byte(accessToken), 24*time.Hour); err != nil {
-			log.Printf("failed to set cache key:%s, err:%v", accessKey, err)
+			logger.Info("Set cache failed", slog.String("key", accessKey), slog.Any("error", err))
 		}
-		if err := as.cache.SetBytes(cacheCtx, refreshToken, []byte(refreshToken), 7*24*time.Hour); err != nil {
-			log.Printf("failed to set cache key:%s, err:%v", refreshKey, err)
+		if err := as.cache.SetBytes(cacheCtx, refreshKey, []byte(refreshToken), 7*24*time.Hour); err != nil {
+			logger.Info("Set cache failed", slog.String("key", refreshKey), slog.Any("error", err))
 		}
 	}
-	return accessToken, refreshToken, nil
+	return LoginResponse{
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }
 
 func (as *AccountService) Logout(ctx context.Context, accountID uint) error {
@@ -130,7 +137,7 @@ func (as *AccountService) Logout(ctx context.Context, accountID uint) error {
 	if err != nil {
 		return err
 	}
-	if account.Token == "" {
+	if account.Token == "" && account.RefreshToken == "" {
 		return nil
 	}
 	if as.cache != nil {
@@ -140,10 +147,10 @@ func (as *AccountService) Logout(ctx context.Context, accountID uint) error {
 		accessKey := as.cache.Key("account:%d:access", account.ID)
 		refreshKey := as.cache.Key("account:%d:refresh", account.ID)
 		if err := as.cache.Del(cacheCtx, accessKey); err != nil {
-			log.Printf("failed to del cache key:%s, err:%v", accessKey, err)
+			logger.Info("Del cache failed", slog.String("key", accessKey), slog.Any("error", err))
 		}
 		if err := as.cache.Del(cacheCtx, refreshKey); err != nil {
-			log.Printf("failed to del cache key:%s, err:%v", refreshKey, err)
+			logger.Info("Del cache failed", slog.String("key", refreshKey), slog.Any("error", err))
 		}
 	}
 	return as.accountRepository.Logout(ctx, account.ID)
@@ -159,30 +166,19 @@ func (as *AccountService) FindAll(ctx context.Context) ([]*Account, error) {
 
 func (as *AccountService) UpdateProfile(ctx context.Context, accountID uint, req *UpdateProfileRequest) error {
 	updates := map[string]any{}
-	if req.Bio != "" {
-		updates["bio"] = strings.TrimSpace(req.Bio)
-	}
-	if req.AvatarURL != "" {
-		updates["avatar_url"] = strings.TrimSpace(req.AvatarURL)
-	}
-	if len(updates) == 0 {
-		return apierror.ErrUserNoFieldsToUpdate
-	}
+	updates["bio"] = strings.TrimSpace(req.Bio)
+	updates["avatar_url"] = strings.TrimSpace(req.AvatarURL)
 	return as.accountRepository.UpdateFields(ctx, accountID, updates)
 }
 
-func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, refreshToken string) (string, error) {
+func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, username, refreshToken string) (string, error) {
 	if as.cache != nil {
 		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 		cacheRefresh, err := as.cache.GetBytes(cacheCtx, as.cache.Key("account:%d:refresh", id))
 		if err == nil {
 			if string(cacheRefresh) == refreshToken {
-				account, err := as.FindByID(ctx, id)
-				if err != nil {
-					return "", err
-				}
-				newToken, err := jwt.GenerateToken(id, account.Username)
+				newToken, err := jwt.GenerateToken(id, username)
 				if err != nil {
 					return "", err
 				}
@@ -191,7 +187,7 @@ func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, refre
 				}
 				key := as.cache.Key("account:%d:access", id)
 				if err := as.cache.SetBytes(cacheCtx, key, []byte(newToken), 24*time.Hour); err != nil {
-					log.Printf("failed to set cache key:%s, err:%v", key, err)
+					logger.Info("Set cache failed", slog.String("key", key), slog.Any("error", err))
 				}
 				return newToken, nil
 			}
@@ -211,9 +207,11 @@ func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, refre
 			return "", err
 		}
 		if as.cache != nil {
+			cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+			defer cancel()
 			key := as.cache.Key("account:%d:access", id)
-			if err := as.cache.SetBytes(ctx, key, []byte(newToken), 24*time.Hour); err != nil {
-				log.Printf("failed to set cache key:%s, err:%v", key, err)
+			if err := as.cache.SetBytes(cacheCtx, key, []byte(newToken), 24*time.Hour); err != nil {
+				logger.Info("Set cache failed", slog.String("key", key), slog.Any("error", err))
 			}
 		}
 		return newToken, nil

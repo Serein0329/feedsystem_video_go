@@ -17,15 +17,13 @@ var (
 var (
 	ErrUserExist            = New(http.StatusConflict, 20001, "用户已存在")
 	ErrUserNotFound         = New(http.StatusNotFound, 20002, "用户不存在")
-	ErrUserPasswordWrong    = New(http.StatusUnauthorized, 20003, "密码错误")
+	ErrUserPasswordWrong    = New(http.StatusBadRequest, 20003, "密码错误")
 	ErrUserNoFieldsToUpdate = New(http.StatusBadRequest, 20004, "没有更新的内容")
 )
 
 // 视频模块 30xxx
 var (
-	ErrVideoNotFound     = New(http.StatusNotFound, 30001, "视频不存在")
-	ErrVideoAlreadyLiked = New(http.StatusConflict, 30002, "已经点赞过该视频")
-	ErrVideoNotLiked     = New(http.StatusBadRequest, 30002, "未点赞过该视频")
+	ErrVideoNotFound = New(http.StatusNotFound, 30001, "视频不存在")
 )
 
 // 评论模块 40xxx
@@ -35,7 +33,5 @@ var (
 
 // 社交模块 50xxx
 var (
-	ErrSocialeExist        = New(http.StatusConflict, 50001, "已经关注该用户")
-	ErrSocialeNotExist     = New(http.StatusConflict, 50001, "未关注该用户")
 	ErrSocialNotFollowSelf = New(http.StatusBadRequest, 50002, "不能关注自己")
 )

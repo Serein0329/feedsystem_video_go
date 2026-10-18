@@ -6,7 +6,10 @@ import (
 	"feedsystem_video_go/internal/config"
 	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
 	"feedsystem_video_go/internal/db/redis"
-	"log"
+	"feedsystem_video_go/internal/pkg/logger"
+	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,32 +19,42 @@ import (
 	"gorm.io/gorm"
 )
 
-func Start(cfg *config.Config, db *gorm.DB, cache *redis.Client, rmq *rabbitmq2.RabbitMQ) {
-	server := &http.Server{
-		Addr:         ":" + cfg.Server.Port,
-		Handler:      SetGIN(db, cache, rmq),
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
+func Start(cfg *config.ServerConfig, db *gorm.DB, cache *redis.Client, rmq *rabbitmq2.RabbitMQ) error {
+	if cfg == nil {
+		return errors.New("config is nil")
 	}
-	go func() {
-		log.Printf("server start success in 0.0.0.0:%s", cfg.Server.Port)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server start failed: %v", err)
-		}
-	}()
-	stop(server)
-}
+	ln, err := net.Listen("tcp", ":"+cfg.Port)
+	if err != nil {
+		return fmt.Errorf("failed to start app server in port %q: %w", cfg.Port, err)
+	}
+	server := &http.Server{
+		Handler:           SetGIN(db, cache, rmq),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+	}
 
-func stop(srv *http.Server) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	defer func() {
+	serveErr := make(chan error, 1)
+	go func() {
+		logger.Info("App listening", slog.String("port", cfg.Port))
+		serveErr <- server.Serve(ln)
 	}()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("server shutdown failed: %v", err)
+	defer signal.Stop(quit)
+
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("app server serve failed: %w", err)
+		}
+		return nil
+	case <-quit:
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			logger.Warn("App server shutdown failed", slog.Any("error", err))
+		}
+		logger.Info("App server stopped")
+		return nil
 	}
-	log.Println("server stop success")
 }

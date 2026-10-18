@@ -80,37 +80,8 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/test || exit 1"]
       interval: 10s
-      timeout: 5s
-      retries: 3
-
-  worker:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-      target: worker
-    restart: always
-    environment:
-      CONFIG_PATH: /app/configs/config.yaml
-      JWT_SECRET: ${JWT_SECRET:-feedsystem-dev-secret-key}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-feedsystem}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
-      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
-      RABBITMQ_PASS: ${RABBITMQ_PASS:-123456}
-    volumes:
-      - ./backend/configs/config.docker.yaml:/app/configs/config.yaml:ro
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep worker || exit 1"]
-      interval: 15s
       timeout: 5s
       retries: 3
 

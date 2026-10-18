@@ -1,7 +1,7 @@
 package mw
 
 import (
-	"uuid"
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 )

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"feedsystem_video_go/internal/account"
 	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
 	rediscache "feedsystem_video_go/internal/db/redis"
@@ -10,11 +11,14 @@ import (
 	"feedsystem_video_go/internal/pkg/apierror"
 	"feedsystem_video_go/internal/pkg/response"
 	"feedsystem_video_go/internal/social"
+	"feedsystem_video_go/internal/sse"
 	"feedsystem_video_go/internal/video"
+	"feedsystem_video_go/internal/worker"
 	"log"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
 )
 
@@ -24,9 +28,6 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	if err := r.SetTrustedProxies(nil); err != nil {
 		log.Printf("SetTrustedProxies failed: %v", err)
 	}
-	r.NoRoute(func(c *gin.Context) {
-		response.FailByErrCode(c, apierror.ErrNotFound)
-	})
 	r.Use(mw.RecoveryHandler())
 	r.Use(mw.LoggerHandler())
 	r.Use(mw.RequestIDHandler())
@@ -35,14 +36,18 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	r.NoMethod(func(c *gin.Context) {
 		response.FailByErrCode(c, apierror.ErrMethodNotAllowed)
 	})
-	r.GET("/healthz", func(c *gin.Context) {
-		response.Success(c, "fine health")
+	r.NoRoute(func(c *gin.Context) {
+		response.FailByErrCode(c, apierror.ErrNotFound)
+	})
+	r.GET("/test", func(c *gin.Context) {
+		response.Success(c, "success!")
 	})
 	r.Static("/static", "./.run/uploads")
 
 	// rate_limit
 	loginLimiter := mw.LimitHandler(cache, "account_login", 10, time.Minute, mw.KeyByIP)
 	registerLimiter := mw.LimitHandler(cache, "account_register", 5, time.Hour, mw.KeyByIP)
+	refreshLimiter := mw.LimitHandler(cache, "account_refresh", 20, time.Hour, mw.KeyByIP)
 	likeLimiter := mw.LimitHandler(cache, "like_write", 30, time.Minute, mw.KeyByAccount)
 	commentLimiter := mw.LimitHandler(cache, "comment_write", 10, time.Minute, mw.KeyByAccount)
 	socialLimiter := mw.LimitHandler(cache, "social_write", 20, time.Minute, mw.KeyByAccount)
@@ -57,7 +62,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 		accountGroup.POST("/login", loginLimiter, accountHandler.Login)
 		accountGroup.POST("/findByID", accountHandler.FindByID)
 		accountGroup.POST("/findByUsername", accountHandler.FindByUsername)
-		accountGroup.POST("/refresh", accountHandler.Refresh)
+		accountGroup.POST("/refresh", refreshLimiter, accountHandler.Refresh)
 	}
 	protectedAccountGroup := accountGroup.Group("")
 	protectedAccountGroup.Use(mw.JWTAuthHandler(accountRepository, cache, true))
@@ -73,7 +78,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	videoRepository := video.NewVideoRepository(db)
 	popularityMQ, err := rabbitmq2.NewPopularityMQ(rmq)
 	if err != nil {
-		log.Printf("PopularityMQ init failed (mq disabled): %v", err)
+		log.Printf("PopularityMQ init failed: %v", err)
 		popularityMQ = nil
 	}
 	videoService := video.NewVideoService(videoRepository, cache, popularityMQ)
@@ -99,7 +104,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	// like
 	likeMQ, err := rabbitmq2.NewLikeMQ(rmq)
 	if err != nil {
-		log.Printf("LikeMQ init failed (mq disabled): %v", err)
+		log.Printf("LikeMQ init failed: %v", err)
 		likeMQ = nil
 	}
 	likeRepository := video.NewLikeRepository(db)
@@ -119,7 +124,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	commentRepository := video.NewCommentRepository(db)
 	commentMQ, err := rabbitmq2.NewCommentMQ(rmq)
 	if err != nil {
-		log.Printf("CommentMQ init failed (mq disabled): %v", err)
+		log.Printf("CommentMQ init failed: %v", err)
 		commentMQ = nil
 	}
 	commentService := video.NewCommentService(commentRepository, videoRepository, cache, commentMQ, popularityMQ)
@@ -138,7 +143,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	// social
 	socialMQ, err := rabbitmq2.NewSocialMQ(rmq)
 	if err != nil {
-		log.Printf("SocialMQ init failed (mq disabled): %v", err)
+		log.Printf("SocialMQ init failed: %v", err)
 		socialMQ = nil
 	}
 	socialRepository := social.NewSocialRepository(db)
@@ -224,62 +229,75 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 		protectedMessageGroup.POST("/list", messageHandler.List)
 	}
 
-	////worker
-	//timelineMQ, err := rabbitmq2.NewTimelineMQ(rmq)
-	//if err != nil {
-	//	log.Printf("timelineMQ init failed (mq disabled): %v", err)
-	//	timelineMQ = nil
-	//}
-	//worker.StartOutboxPoller(db, timelineMQ)
-	//worker.StartConsumer(timelineMQ, "video.timeline.update.queue", cache, rmq)
-	//
-	//// SSE notification
-	//if rmq != nil {
-	//	if notifCh, err := rmq.NewChannel(); err == nil {
-	//		if err := rabbitmq2.DeclareTopic(notifCh, "like.events", "notification.like", "like.like"); err != nil {
-	//			log.Printf("notification like topic init failed: %v", err)
-	//		}
-	//		if err := rabbitmq2.DeclareTopic(notifCh, "comment.events", "notification.comment", "comment.publish"); err != nil {
-	//			log.Printf("notification comment topic init failed: %v", err)
-	//		}
-	//		if err := rabbitmq2.DeclareTopic(notifCh, "social.events", "notification.social", "social.follow"); err != nil {
-	//			log.Printf("notification social topic init failed: %v", err)
-	//		}
-	//		notifCh.Close()
-	//	}
-	//}
-	//sseHub := worker.NewSSEHub(db)
-	//notifGroup := r.Group("/notification")
-	//notifGroup.Use(sseHub.SSERequireAuth())
-	//sseHub.RegisterRoutes(r, notifGroup)
-	//
-	//go func() {
-	//	if rmq != nil {
-	//		hub := sseHub
-	//		ctx := context.Background()
-	//		// 每个 notification worker 独立 Channel + 自动重连
-	//		for _, q := range []string{"notification.like", "notification.comment", "notification.social"} {
-	//			go func(queue string) {
-	//				for {
-	//					ch, err := rmq.NewChannel()
-	//					if err != nil {
-	//						log.Printf("notification-%s: 创建 Channel 失败: %v, 5秒后重试", queue, err)
-	//						time.Sleep(5 * time.Second)
-	//						continue
-	//					}
-	//					w := worker.NewNotificationWorker(ch, db, queue, hub)
-	//					if err := w.Run(ctx); err != nil {
-	//						log.Printf("notification-%s: %v, 5秒后重连...", queue, err)
-	//					}
-	//					ch.Close()
-	//					time.Sleep(5 * time.Second)
-	//				}
-	//			}(q)
-	//		}
-	//	} else {
-	//		log.Printf("Notification SSE disabled (MQ not available)")
-	//	}
-	//}()
+	// SSE notification
+	sseHub := sse.NewSSEHub(db)
+	notifGroup := r.Group("/notification")
+	notifGroup.Use(mw.SSEAuthHandler())
+	notifGroup.GET("/stream", sseHub.SSEHandler)
+	notifGroup.POST("/list", sseHub.ListHandler)
+	notifGroup.POST("/markRead", sseHub.MarkReadHandler)
+	notifGroup.POST("/unreadCount", sseHub.UnreadCountHandler)
 
+	//Worker
+	timelineMQ, err := rabbitmq2.NewTimelineMQ(rmq)
+	if err != nil {
+		log.Printf("timelineMQ init failed: %v", err)
+		timelineMQ = nil
+	}
+	worker.StartProducer(db, timelineMQ)
+	worker.StartConsumer("video.timeline.events", cache, rmq)
+	go func() {
+		if rmq != nil {
+			if err := rabbitmq2.DeclareNotificationTopics(rmq); err != nil {
+				log.Printf("notification topics init failed: %v", err)
+			}
+			if err := worker.NewNotificationWorker(rmq, db, sseHub).Run(context.Background()); err != nil {
+				log.Printf("NotificationWorker Run err: %v", err.Error())
+			}
+		} else {
+			log.Printf("Notification SSE disabled")
+		}
+	}()
+	go runWorkerWithRetry("SocialWorker", rmq, func(ch *amqp.Channel) error {
+		return worker.NewSocialWorker(ch, socialRepository, "social.events").Run(context.Background())
+	})
+	go runWorkerWithRetry("LikeWorker", rmq, func(ch *amqp.Channel) error {
+		return worker.NewLikeWorker(ch, likeRepository, videoRepository, "like.events").Run(context.Background())
+	})
+	go runWorkerWithRetry("CommentWorker", rmq, func(ch *amqp.Channel) error {
+		return worker.NewCommentWorker(ch, commentRepository, videoRepository, "comment.events").Run(context.Background())
+	})
+	if cache != nil {
+		go runWorkerWithRetry("PopularityWorker", rmq, func(ch *amqp.Channel) error {
+			return worker.NewPopularityWorker(ch, cache, "video.popularity.events").Run(context.Background())
+		})
+	}
 	return r
+}
+
+func runWorkerWithRetry(name string, rmq *rabbitmq2.RabbitMQ, fn func(*amqp.Channel) error) {
+	if rmq == nil {
+		return
+	}
+	for {
+		ch, err := rmq.Conn.Channel()
+		if err != nil {
+			log.Printf("%s: 创建 Channel 失败: %v, 5秒后重试", name, err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		if err := ch.Qos(50, 0, false); err != nil {
+			log.Printf("%s: QoS 设置失败: %v, 5秒后重试", name, err)
+			_ = ch.Close()
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Printf("%s started, consuming", name)
+		if err := fn(ch); err != nil {
+			log.Printf("%s: %v, 5秒后重连...", name, err)
+		}
+		_ = ch.Close()
+		time.Sleep(5 * time.Second)
+	}
 }

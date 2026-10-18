@@ -32,8 +32,8 @@ type ListLatestResponse struct {
 
 type ListLikesCountRequest struct {
 	Limit            int    `json:"limit"`
-	LikesCountBefore *int64 `json:"likes_count_before,omitempty"`
-	IDBefore         *uint  `json:"id_before,omitempty"`
+	LikesCountBefore *int64 `json:"likes_count_before" binding:"omitempty,min=0"`
+	IDBefore         *uint  `json:"id_before" binding:"omitempty,min=1"`
 }
 
 type LikesCountCursor struct {
@@ -60,14 +60,14 @@ type ListByFollowingResponse struct {
 }
 
 type ListByPopularityRequest struct {
-	Limit          int   `json:"limit"`
-	AsOf           int64 `json:"as_of"`  // 服务器返回的分钟时间戳；第一页传0
-	Offset         int   `json:"offset"` // 下一页从这里开始；第一页传0
-	LatestIDBefore *uint `json:"latest_id_before,omitempty"`
+	Limit  int   `json:"limit"`
+	AsOf   int64 `json:"as_of"`  // 服务器返回的分钟时间戳；第一页传0
+	Offset int   `json:"offset"` // 下一页从这里开始；第一页传0
 
 	// DB fallback 用（可选）
-	LatestPopularity int64     `json:"latest_popularity"`
+	LatestPopularity int64     `json:"latest_popularity" binding:"omitempty,min=1"`
 	LatestBefore     time.Time `json:"latest_before"`
+	LatestIDBefore   *uint     `json:"latest_id_before" binding:"omitempty,min=1"`
 }
 
 type ListByPopularityResponse struct {
@@ -79,4 +79,16 @@ type ListByPopularityResponse struct {
 	NextLatestPopularity *int64     `json:"next_latest_popularity,omitempty"`
 	NextLatestBefore     *time.Time `json:"next_latest_before,omitempty"`
 	NextLatestIDBefore   *uint      `json:"next_latest_id_before,omitempty"`
+}
+
+type ListByTagRequest struct {
+	TagName    string `json:"tag_name" binding:"required"`
+	Limit      int    `json:"limit"`
+	LatestTime int64  `json:"latest_time"`
+}
+
+type ListByTagResponse struct {
+	VideoList []FeedVideoItem `json:"video_list"`
+	NextTime  int64           `json:"next_time"`
+	HasMore   bool            `json:"has_more"`
 }

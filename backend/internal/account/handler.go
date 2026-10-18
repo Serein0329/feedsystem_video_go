@@ -29,10 +29,11 @@ func (h *AccountHandler) CreateAccount(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.accountService.CreateAccount(c.Request.Context(), &Account{
-		Username: req.Username,
-		Password: req.Password,
-	}); err != nil {
+	if strings.TrimSpace(req.Username) == "" {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "用户名不为空"})
+		return
+	}
+	if err := h.accountService.CreateAccount(c.Request.Context(), req.Username, req.Password); err != nil {
 		response.FailByErr(c, err)
 		return
 	}
@@ -46,21 +47,21 @@ func (h *AccountHandler) Rename(c *gin.Context) {
 		return
 	}
 	accountID, _ := getAccountIDByGIN(c)
-	token, err := h.accountService.Rename(c.Request.Context(), accountID, req.NewUsername)
+	res, err := h.accountService.Rename(c.Request.Context(), accountID, req.NewUsername)
 	if err != nil {
 		response.FailByErr(c, err)
 		return
 	}
-	response.Success(c, gin.H{"token": token})
+	response.Success(c, res)
 }
 
 func (h *AccountHandler) ChangePassword(c *gin.Context) {
-	id, _ := getAccountIDByGIN(c)
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	id, _ := getAccountIDByGIN(c)
 	if err := h.accountService.ChangePassword(c.Request.Context(), id, req.OldPassword, req.NewPassword); err != nil {
 		response.FailByErr(c, err)
 		return
@@ -100,12 +101,16 @@ func (h *AccountHandler) Login(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	accessToken, refreshToken, err := h.accountService.Login(c.Request.Context(), req.Username, req.Password)
+	res, err := h.accountService.Login(c.Request.Context(), req.Username, req.Password)
 	if err != nil {
-		response.FailByErr(c, err)
+		if errors.Is(err, apierror.ErrUserNotFound) || errors.Is(err, apierror.ErrUserPasswordWrong) {
+			response.Fail(c, apierror.ErrUserPasswordWrong.HttpStatus, apierror.ErrUserPasswordWrong.Code, "用户名或密码错误")
+			return
+		}
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-	response.Success(c, LoginResponse{Token: accessToken, RefreshToken: refreshToken})
+	response.Success(c, res)
 }
 
 func (h *AccountHandler) Logout(c *gin.Context) {
@@ -118,7 +123,6 @@ func (h *AccountHandler) Logout(c *gin.Context) {
 }
 
 func (h *AccountHandler) UploadAvatar(c *gin.Context) {
-	accountID, _ := getAccountIDByGIN(c)
 	f, err := c.FormFile("file")
 	if err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
@@ -126,7 +130,7 @@ func (h *AccountHandler) UploadAvatar(c *gin.Context) {
 	}
 	const maxSize = 10 << 20
 	if f.Size <= 0 || f.Size > maxSize {
-		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size exceeds 10MB limit"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size max 10MB"})
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(f.Filename))
@@ -136,6 +140,7 @@ func (h *AccountHandler) UploadAvatar(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .jpg/.jpeg/.png/.webp allowed"})
 		return
 	}
+	accountID, _ := getAccountIDByGIN(c)
 	dir := filepath.Join(".run", "uploads", "avatars", strconv.FormatUint(uint64(accountID), 10))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
@@ -162,13 +167,12 @@ func (h *AccountHandler) UploadAvatar(c *gin.Context) {
 }
 
 func (h *AccountHandler) UpdateProfile(c *gin.Context) {
-	accountID, _ := getAccountIDByGIN(c)
 	var req UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	accountID, _ := getAccountIDByGIN(c)
 	if err := h.accountService.UpdateProfile(c.Request.Context(), accountID, &req); err != nil {
 		response.FailByErr(c, err)
 		return
@@ -189,7 +193,7 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	newToken, err := h.accountService.RefreshAccessToken(c.Request.Context(), claims.AccountID, req.RefreshToken)
+	newToken, err := h.accountService.RefreshAccessToken(c.Request.Context(), claims.AccountID, claims.Username, req.RefreshToken)
 	if err != nil {
 		response.FailByErr(c, err)
 		return

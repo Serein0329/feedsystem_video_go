@@ -16,8 +16,8 @@ func NewAccountRepository(db *gorm.DB) *AccountRepository {
 	return &AccountRepository{db: db}
 }
 
-func (ar *AccountRepository) CreateAccount(ctx context.Context, account *Account) error {
-	if err := ar.db.WithContext(ctx).Create(account).Error; err != nil {
+func (ar *AccountRepository) CreateAccount(ctx context.Context, username, password string) error {
+	if err := ar.db.WithContext(ctx).Create(&Account{Username: username, Password: password}).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			return apierror.ErrUserExist
 		}
@@ -26,18 +26,7 @@ func (ar *AccountRepository) CreateAccount(ctx context.Context, account *Account
 	return nil
 }
 
-//func (ar *AccountRepository) Rename(ctx context.Context, id uint, newUsername string) error {
-//	result := ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("username", newUsername)
-//	if result.Error != nil {
-//		return result.Error
-//	}
-//	if result.RowsAffected == 0 {
-//		return gorm.ErrRecordNotFound
-//	}
-//	return nil
-//}
-
-func (ar *AccountRepository) RenameWithToken(ctx context.Context, id uint, newUsername string, token string) error {
+func (ar *AccountRepository) Rename(ctx context.Context, id uint, newUsername, token, refreshToken string) error {
 	return ar.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&Account{}).Where("id = ?", id).Update("username", newUsername)
 		if result.Error != nil {
@@ -49,8 +38,10 @@ func (ar *AccountRepository) RenameWithToken(ctx context.Context, id uint, newUs
 		if result.RowsAffected == 0 {
 			return apierror.New(apierror.ErrUserNoFieldsToUpdate.HttpStatus, apierror.ErrUserNoFieldsToUpdate.Code, "与原用户名一样")
 		}
-		//username和token不应该一起updates，先单独更新username可以获取"用户名已存在"报错信息
-		if err := tx.Model(&Account{}).Where("id = ?", id).Update("token", token).Error; err != nil {
+		if err := tx.Model(&Account{}).Where("id = ?", id).Updates(map[string]any{
+			"token":         token,
+			"refresh_token": refreshToken,
+		}).Error; err != nil {
 			return err
 		}
 		return nil
@@ -58,10 +49,7 @@ func (ar *AccountRepository) RenameWithToken(ctx context.Context, id uint, newUs
 }
 
 func (ar *AccountRepository) ChangePassword(ctx context.Context, id uint, newPassword string) error {
-	if err := ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("password", newPassword).Error; err != nil {
-		return err
-	}
-	return nil
+	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("password", newPassword).Error
 }
 
 func (ar *AccountRepository) FindByID(ctx context.Context, id uint) (*Account, error) {
@@ -95,17 +83,11 @@ func (ar *AccountRepository) IsExist(ctx context.Context, id uint) (bool, error)
 }
 
 func (ar *AccountRepository) Login(ctx context.Context, id uint, token, refreshToken string) error {
-	if err := ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(map[string]any{"token": token, "refresh_token": refreshToken}).Error; err != nil {
-		return err
-	}
-	return nil
+	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(map[string]any{"token": token, "refresh_token": refreshToken}).Error
 }
 
 func (ar *AccountRepository) Logout(ctx context.Context, id uint) error {
-	if err := ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(map[string]any{"token": "", "refresh_token": ""}).Error; err != nil {
-		return err
-	}
-	return nil
+	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(map[string]any{"token": "", "refresh_token": ""}).Error
 }
 
 func (ar *AccountRepository) UpdateAvatar(ctx context.Context, accountID uint, avatarURL string) error {

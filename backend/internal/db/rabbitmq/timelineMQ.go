@@ -15,7 +15,7 @@ type TimelineMQ struct {
 
 const (
 	timelineExchange   = "video.timeline.events"
-	timelineQueue      = "video.timeline.update.queue"
+	timelineQueue      = "video.timeline.events"
 	timelineBindingKey = "video.timeline.*"
 	timelinePublishRK  = "video.timeline.publish"
 )
@@ -36,7 +36,7 @@ func NewTimelineMQ(base *RabbitMQ) (*TimelineMQ, error) {
 		return nil, err
 	}
 	if err := DeclareTopic(ch, timelineExchange, timelineQueue, timelineBindingKey); err != nil {
-		ch.Close()
+		_ = ch.Close()
 		return nil, err
 	}
 	return &TimelineMQ{ch: ch}, nil
@@ -45,9 +45,6 @@ func NewTimelineMQ(base *RabbitMQ) (*TimelineMQ, error) {
 func (t *TimelineMQ) PublishVideo(ctx context.Context, videoID uint, createTime time.Time) error {
 	if t == nil || t.ch == nil {
 		return errors.New("timeline mq is not initialized")
-	}
-	if videoID == 0 {
-		return errors.New("videoID are required")
 	}
 	id, err := randhex.New(16)
 	if err != nil {

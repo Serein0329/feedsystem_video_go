@@ -3,8 +3,9 @@ package http
 import (
 	"context"
 	"errors"
+	"feedsystem_video_go/internal/config"
+	"feedsystem_video_go/internal/pkg/logger"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,7 +14,6 @@ import (
 )
 
 type PprofServer struct {
-	name            string
 	server          *http.Server
 	shutdownTimeout time.Duration
 }
@@ -29,42 +29,39 @@ func NewPprofMux() *http.ServeMux {
 	return mux
 }
 
-func NewPprofServer(name string, enabled bool, addr string) (*PprofServer, error) {
-	if !enabled || addr == "" {
+func NewPprofServer(cfg *config.PprofConfig) (*PprofServer, error) {
+	if cfg == nil || !cfg.Enabled || cfg.Addr == "" {
 		return nil, nil
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start %s pprof server on %s: %w", name, addr, err)
+		return nil, fmt.Errorf("failed to start pprof server on %s: %w", cfg.Addr, err)
 	}
 	pprofServer := &PprofServer{
-		name:            name,
+		server: &http.Server{
+			Handler:     NewPprofMux(),
+			ReadTimeout: 5 * time.Second,
+		},
 		shutdownTimeout: 3 * time.Second,
 	}
-	pprofServer.server = &http.Server{
-		Addr:              addr,
-		Handler:           NewPprofMux(),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	pprofServer.server.ListenAndServe()
 	go func() {
-		slog.Info(fmt.Sprintf("%s pprof listening on %s", name, addr))
+		logger.Info("Pprof listening", slog.String("addr", cfg.Addr))
 		if err := pprofServer.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("%s pprof server error: %v", name, err)
+			logger.Error("Pprof server failed", slog.Any("error", err))
 		}
 	}()
 	return pprofServer, nil
 }
 
-func (s *PprofServer) Shutdown() error {
+func (s *PprofServer) Shutdown() {
 	if s == nil {
-		return nil
+		return
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 	defer cancel()
 	if err := s.server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Failed to shutdown %s pprof server: %v", s.name, err)
-		return err
+		logger.Warn("Pprof shutdown failed", slog.Any("error", err))
+		return
 	}
-	return nil
+	logger.Info("Pprof shutdown success")
 }

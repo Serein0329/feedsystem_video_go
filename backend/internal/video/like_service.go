@@ -23,14 +23,12 @@ func NewLikeService(repo *LikeRepository, videoRepo *VideoRepository, cache *red
 }
 
 func (s *LikeService) Like(ctx context.Context, like *Like) error {
-	if s.VideoRepo != nil {
-		ok, err := s.VideoRepo.IsExist(ctx, like.VideoID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return apierror.ErrVideoNotFound
-		}
+	ok, err := s.VideoRepo.IsExist(ctx, like.VideoID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return apierror.ErrVideoNotFound
 	}
 
 	isLiked, err := s.repo.IsLiked(ctx, like.VideoID, like.AccountID)
@@ -38,7 +36,7 @@ func (s *LikeService) Like(ctx context.Context, like *Like) error {
 		return err
 	}
 	if isLiked {
-		return apierror.ErrVideoAlreadyLiked
+		return nil
 	}
 
 	like.CreatedAt = time.Now()
@@ -60,12 +58,8 @@ func (s *LikeService) Like(ctx context.Context, like *Like) error {
 
 	if !mysqlEnqueued {
 		err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			var count int64
-			if err := tx.Model(&Video{}).Where("id = ?", like.VideoID).Count(&count).Error; err != nil {
+			if err := tx.Create(&like).Error; err != nil {
 				return err
-			}
-			if count == 0 {
-				return apierror.ErrVideoNotFound
 			}
 			if err := tx.Model(&Video{}).Where("id = ?", like.VideoID).
 				UpdateColumn("likes_count", gorm.Expr("likes_count + 1")).Error; err != nil {
@@ -99,7 +93,7 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 		return err
 	}
 	if !isLiked {
-		return apierror.ErrVideoNotLiked
+		return nil
 	}
 
 	mysqlEnqueued := false

@@ -1,7 +1,5 @@
 server:
   port: 8080
-  read_timeout: 5s
-  write_timeout: 10s
 
 database:
   host: localhost
@@ -24,5 +22,4 @@ rabbitmq:
   
 pprof:
   enabled: true
-  api_addr: localhost:6060
-  worker_addr: localhost:6061
+  addr: 0.0.0.0:6060

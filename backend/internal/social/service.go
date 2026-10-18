@@ -60,14 +60,14 @@ func (s *SocialService) Unfollow(ctx context.Context, social *Social) error {
 		return err
 	}
 	if !isFollowed {
-		return apierror.ErrSocialeNotExist
+		return nil
 	}
 
 	if err := s.repo.Unfollow(ctx, social); err != nil {
 		return err
 	}
 
-	s.invalidateFollowingFeedCache(context.Background(), social.FollowerID)
+	s.invalidateFollowingFeedCache(ctx, social.FollowerID)
 
 	if s.socialMQ != nil {
 		if err := s.socialMQ.UnFollow(ctx, social.FollowerID, social.VloggerID); err != nil {

@@ -73,7 +73,7 @@ func (w *CommentWorker) handleDelivery(ctx context.Context, d amqp.Delivery) {
 				_ = d.Ack(false)
 				return
 			}
-			wait := time.Duration(1<<uint(i)) * time.Second
+			wait := time.Duration(1<<i) * time.Second
 			log.Printf("comment worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
 			time.Sleep(wait)
 			continue
@@ -99,18 +99,6 @@ func (w *CommentWorker) process(ctx context.Context, body []byte) error {
 }
 
 func (w *CommentWorker) applyPublish(ctx context.Context, evt *rabbitmq.CommentEvent) error {
-	if evt == nil || evt.VideoID == 0 || evt.AuthorID == 0 || strings.TrimSpace(evt.Content) == "" {
-		return nil
-	}
-
-	ok, err := w.videos.IsExist(ctx, evt.VideoID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return nil
-	}
-
 	c := &video.Comment{
 		Username: strings.TrimSpace(evt.Username),
 		VideoID:  evt.VideoID,
@@ -124,15 +112,8 @@ func (w *CommentWorker) applyPublish(ctx context.Context, evt *rabbitmq.CommentE
 }
 
 func (w *CommentWorker) applyDelete(ctx context.Context, evt *rabbitmq.CommentEvent) error {
-	if evt == nil || evt.CommentID == 0 {
-		return nil
-	}
-	c, err := w.comments.GetByID(ctx, evt.CommentID)
-	if err != nil {
+	if err := w.comments.DeleteComment(ctx, evt.CommentID); err != nil {
 		return err
 	}
-	if c == nil {
-		return nil
-	}
-	return w.comments.DeleteComment(ctx, c)
+	return w.videos.ChangePopularity(ctx, evt.VideoID, -1)
 }

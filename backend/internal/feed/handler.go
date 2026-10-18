@@ -33,7 +33,7 @@ func (f *FeedHandler) ListLatest(c *gin.Context) {
 	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 	feedItems, err := f.service.ListLatest(c.Request.Context(), req.Limit, latestTime, viewerAccountID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	feedItems.VideoList = nonNilFeedVideoItems(feedItems.VideoList)
@@ -43,7 +43,7 @@ func (f *FeedHandler) ListLatest(c *gin.Context) {
 func (f *FeedHandler) ListLikesCount(c *gin.Context) {
 	var req ListLikesCountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
@@ -53,95 +53,65 @@ func (f *FeedHandler) ListLikesCount(c *gin.Context) {
 	var cursor *LikesCountCursor
 	if req.LikesCountBefore != nil || req.IDBefore != nil {
 		if req.LikesCountBefore == nil || req.IDBefore == nil {
-			c.JSON(400, gin.H{"error": "likes_count_before and id_before must be provided together"})
+			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "likes_count_before and id_before must be provided together"})
 			return
 		}
-
-		likesCountBefore := *req.LikesCountBefore
-		idBefore := *req.IDBefore
-
-		if likesCountBefore < 0 {
-			c.JSON(400, gin.H{"error": "invalid cursor: likes_count_before must be >= 0"})
-			return
-		}
-		if idBefore == 0 {
-			if likesCountBefore != 0 {
-				c.JSON(400, gin.H{"error": "invalid cursor: id_before must be > 0"})
-				return
-			}
-		} else {
-			cursor = &LikesCountCursor{
-				LikesCount: likesCountBefore,
-				ID:         idBefore,
-			}
+		cursor = &LikesCountCursor{
+			LikesCount: *req.LikesCountBefore,
+			ID:         *req.IDBefore,
 		}
 	}
-	viewerAccountID, err := mw.GetAccountIDByGIN(c)
-	if err != nil {
-		viewerAccountID = 0
-	}
+	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 	feedItems, err := f.service.ListLikesCount(c.Request.Context(), req.Limit, cursor, viewerAccountID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	feedItems.VideoList = nonNilFeedVideoItems(feedItems.VideoList)
-	c.JSON(200, feedItems)
+	response.Success(c, feedItems)
 }
 
 func (f *FeedHandler) ListByFollowing(c *gin.Context) {
 	var req ListByFollowingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
 		req.Limit = 10
 	}
-	viewerAccountID, err := mw.GetAccountIDByGIN(c)
-	if err != nil {
-		viewerAccountID = 0
-	}
+	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 	var latestTime time.Time
 	if req.LatestTime > 0 {
 		latestTime = time.Unix(req.LatestTime, 0)
 	}
 	feedItems, err := f.service.ListByFollowing(c.Request.Context(), req.Limit, latestTime, viewerAccountID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	feedItems.VideoList = nonNilFeedVideoItems(feedItems.VideoList)
-	c.JSON(200, feedItems)
+	response.Success(c, feedItems)
 }
 
 func (f *FeedHandler) ListByPopularity(c *gin.Context) {
 	var req ListByPopularityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
 		req.Limit = 10
 	}
-	viewerAccountID, err := mw.GetAccountIDByGIN(c)
-	if err != nil {
-		viewerAccountID = 0
-	}
+	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 
 	var latestPopularity int64
 	var latestBefore time.Time
 	var latestIDBefore uint
-
-	if req.LatestPopularity < 0 {
-		c.JSON(400, gin.H{"error": "latest_popularity must be >= 0"})
-		return
-	}
-
 	anyCursor := !req.LatestBefore.IsZero() || req.LatestIDBefore != nil
 	if anyCursor {
-		if req.LatestBefore.IsZero() || req.LatestIDBefore == nil || *req.LatestIDBefore == 0 {
-			c.JSON(400, gin.H{"error": "latest_before and latest_id_before must be provided together"})
+		if req.LatestBefore.IsZero() || req.LatestIDBefore == nil {
+			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "latest_before and latest_id_before must be provided together"})
 			return
 		}
 		latestPopularity = req.LatestPopularity
@@ -159,11 +129,34 @@ func (f *FeedHandler) ListByPopularity(c *gin.Context) {
 		latestIDBefore,
 	)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	resp.VideoList = nonNilFeedVideoItems(resp.VideoList)
-	c.JSON(200, resp)
+	response.Success(c, resp)
+}
+
+func (f *FeedHandler) ListByTag(c *gin.Context) {
+	var req ListByTagRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Limit <= 0 || req.Limit > 50 {
+		req.Limit = 10
+	}
+	var lastTime time.Time
+	if req.LatestTime > 0 {
+		lastTime = time.UnixMilli(req.LatestTime)
+	}
+	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
+	resp, err := f.service.ListByTag(c.Request.Context(), req.TagName, req.Limit, lastTime, viewerAccountID)
+	if err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		return
+	}
+	resp.VideoList = nonNilFeedVideoItems(resp.VideoList)
+	response.Success(c, resp)
 }
 
 func nonNilFeedVideoItems(items []FeedVideoItem) []FeedVideoItem {
@@ -171,29 +164,4 @@ func nonNilFeedVideoItems(items []FeedVideoItem) []FeedVideoItem {
 		return []FeedVideoItem{}
 	}
 	return items
-}
-
-func (h *FeedHandler) ListByTag(c *gin.Context) {
-	var req struct {
-		TagName string `json:"tag_name"`
-		Limit   int    `json:"limit"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-	if req.TagName == "" {
-		c.JSON(400, gin.H{"error": "tag_name is required"})
-		return
-	}
-	if req.Limit <= 0 || req.Limit > 50 {
-		req.Limit = 10
-	}
-	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
-	items, err := h.service.ListByTag(c.Request.Context(), req.TagName, req.Limit, viewerAccountID)
-	if err != nil {
-		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"video_list": nonNilFeedVideoItems(items)})
 }

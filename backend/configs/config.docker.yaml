@@ -1,7 +1,5 @@
 server:
   port: 8080
-  read_timeout: 5s
-  write_timeout: 10s
 
 database:
   host: mysql
@@ -22,8 +20,6 @@ rabbitmq:
   username: admin
   password: 123456
 
-observability:
-  pprof:
-    enabled: false
-    api_addr: localhost:6060
-    worker_addr: localhost:6061
+pprof:
+  enabled: false
+  addr: localhost:6060

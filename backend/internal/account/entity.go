@@ -11,12 +11,12 @@ type Account struct {
 }
 
 type CreateAccountRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username" binding:"required,max=20"`
 	Password string `json:"password" binding:"required,min=8,max=20"`
 }
 
 type RenameRequest struct {
-	NewUsername string `json:"new_username" binding:"required"`
+	NewUsername string `json:"new_username" binding:"required,max=20"`
 }
 
 type FindByIDRequest struct {
@@ -24,7 +24,7 @@ type FindByIDRequest struct {
 }
 
 type FindByUsernameRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username" binding:"required,max=20"`
 }
 
 type ChangePasswordRequest struct {
@@ -33,7 +33,7 @@ type ChangePasswordRequest struct {
 }
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username" binding:"required,max=20"`
 	Password string `json:"password" binding:"required,min=8,max=20"`
 }
 
@@ -55,6 +55,10 @@ type LoginResponse struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+type RenameResponse struct {
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
+}
 type GetProfileResponse struct {
 	Account
 	VideoCount    int64 `json:"video_count"`

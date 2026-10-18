@@ -9,7 +9,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -24,7 +23,7 @@ func NewSocialWorker(ch *amqp.Channel, repo *social.SocialRepository, queue stri
 }
 
 func (w *SocialWorker) Run(ctx context.Context) error {
-	if w == nil || w.ch == nil || w.repo == nil {
+	if w == nil || w.ch == nil {
 		return errors.New("social worker is not initialized")
 	}
 	if w.queue == "" {
@@ -72,7 +71,7 @@ func (w *SocialWorker) handleDelivery(ctx context.Context, d amqp.Delivery) {
 				_ = d.Ack(false)
 				return
 			}
-			wait := time.Duration(1<<uint(i)) * time.Second
+			wait := time.Duration(1<<i) * time.Second
 			log.Printf("social worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
 			time.Sleep(wait)
 			continue
@@ -99,10 +98,6 @@ func (w *SocialWorker) process(ctx context.Context, body []byte) error {
 			VloggerID:  evt.VloggerID,
 		})
 		if err == nil {
-			return nil
-		}
-		var mysqlErr *mysql.MySQLError
-		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
 			return nil
 		}
 		return err

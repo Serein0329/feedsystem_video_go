@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,9 +18,7 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port         string        `yaml:"port"`
-	ReadTimeout  time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
+	Port string `yaml:"port"`
 }
 
 type DatabaseConfig struct {
@@ -47,9 +44,8 @@ type RabbitMQConfig struct {
 }
 
 type PprofConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	ApiAddr    string `yaml:"api_addr"`
-	WorkerAddr string `yaml:"worker_addr"`
+	Enabled bool   `yaml:"enabled"`
+	Addr    string `yaml:"addr"`
 }
 
 func Load(filename string) (*Config, error) {
@@ -135,9 +131,7 @@ func LoadLocalDev(filename string) (*Config, bool, error) {
 func DefaultLocalConfig() *Config {
 	cfg := Config{
 		Server: ServerConfig{
-			Port:         "8080",
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
+			Port: "8080",
 		},
 		Database: DatabaseConfig{
 			Host:     "localhost",
@@ -159,9 +153,8 @@ func DefaultLocalConfig() *Config {
 			Password: "123456",
 		},
 		Pprof: PprofConfig{
-			Enabled:    true,
-			ApiAddr:    "localhost:6060",
-			WorkerAddr: "localhost:6061",
+			Enabled: true,
+			Addr:    "localhost:6060",
 		},
 	}
 	ApplyEnvOverrides(&cfg)

@@ -72,7 +72,7 @@ func (w *PopularityWorker) handleDelivery(ctx context.Context, d amqp.Delivery) 
 				_ = d.Ack(false)
 				return
 			}
-			wait := time.Duration(1<<uint(i)) * time.Second
+			wait := time.Duration(1<<i) * time.Second
 			log.Printf("popularity worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
 			time.Sleep(wait)
 			continue

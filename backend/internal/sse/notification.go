@@ -1,8 +1,7 @@
-package notification
+package sse
 
 import "time"
 
-// Notification 通知实体，独立成包以避免 video 与 worker 之间的循环导入。
 type Notification struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	RecipientID uint      `gorm:"index;not null" json:"recipient_id"`
