@@ -161,7 +161,11 @@ func (as *AccountService) UpdateAvatar(ctx context.Context, accountID uint, avat
 }
 
 func (as *AccountService) UpdateBio(ctx context.Context, accountID uint, bio string) error {
-	return as.accountRepository.UpdateBio(ctx, accountID, strings.TrimSpace(bio))
+	bio = strings.TrimSpace(bio)
+	if bio == "" {
+		return apierror.ErrUserNoFieldsToUpdate
+	}
+	return as.accountRepository.UpdateBio(ctx, accountID, bio)
 }
 
 func (as *AccountService) IsExist(ctx context.Context, accountID uint) (bool, error) {

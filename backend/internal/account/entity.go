@@ -38,7 +38,7 @@ type LoginRequest struct {
 }
 
 type UpdateBioRequest struct {
-	Bio string `json:"bio"`
+	Bio string `json:"bio" binding:"required"`
 }
 
 type RefreshRequest struct {

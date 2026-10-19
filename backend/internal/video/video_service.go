@@ -17,14 +17,14 @@ import (
 )
 
 type VideoService struct {
-	repo         *VideoRepository
-	cache        *rediscache.Client
-	cacheTTL     time.Duration
-	popularityMQ *rabbitmq.PopularityMQ
+	repo       *VideoRepository
+	cache      *rediscache.Client
+	cacheTTL   time.Duration
+	timelineMQ *rabbitmq.TimelineMQ
 }
 
-func NewVideoService(repo *VideoRepository, cache *rediscache.Client, popularityMQ *rabbitmq.PopularityMQ) *VideoService {
-	return &VideoService{repo: repo, cache: cache, cacheTTL: 5 * time.Minute, popularityMQ: popularityMQ}
+func NewVideoService(repo *VideoRepository, cache *rediscache.Client, popularityMQ *rabbitmq.TimelineMQ) *VideoService {
+	return &VideoService{repo: repo, cache: cache, cacheTTL: 5 * time.Minute, timelineMQ: popularityMQ}
 }
 
 func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
@@ -33,20 +33,10 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 	video.CoverURL = strings.TrimSpace(video.CoverURL)
 
 	tags := ExtractTags(video.Description)
-	msg := OutboxMsg{
-		VideoID:    video.ID,
-		EventType:  "video_published",
-		Status:     "pending",
-		CreateTime: video.CreateTime,
-	}
-	err := vs.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := vs.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(video).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(&msg).Error; err != nil {
-			return err
-		}
-
 		for _, tagName := range tags {
 			var tag Tag
 			if err := tx.Where("name = ?", tagName).FirstOrCreate(&tag, Tag{Name: tagName}).Error; err != nil {
@@ -57,8 +47,16 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 			}
 		}
 		return nil
-	})
-	return err
+	}); err != nil {
+		return err
+	}
+	if err := vs.timelineMQ.PublishVideo(ctx, video.ID, video.CreateTime); err != nil {
+		logger.Info("publish msg failed",
+			slog.String("excahnge", rabbitmq.TimelineExchange),
+			slog.String("bindingkey", rabbitmq.TimelineBindingKey),
+			slog.Any("error", err))
+	}
+	return nil
 }
 
 func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) error {
@@ -73,8 +71,10 @@ func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) erro
 		return err
 	}
 	if vs.cache != nil {
-		cacheKey := vs.cache.Key("video:%d", id)
-		if err = vs.cache.Del(context.Background(), cacheKey); err != nil {
+		cahceCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+		cacheKey := vs.cache.Key("video:entity:%d", id)
+		if err = vs.cache.Del(cahceCtx, cacheKey); err != nil {
 			logger.Info("Del cache failed", slog.String("key", cacheKey), slog.Any("error", err))
 		}
 	}
@@ -90,7 +90,7 @@ func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID uint) ([]Vi
 }
 
 func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) {
-	cacheKey := vs.cache.Key("video:%d", id)
+	cacheKey := vs.cache.Key("video:entity:%d", id)
 
 	getCached := func() (*Video, error) {
 		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)

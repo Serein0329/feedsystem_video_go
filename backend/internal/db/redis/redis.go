@@ -18,11 +18,7 @@ type Client struct {
 
 const defaultKeyPrefix = "feedsystem:"
 
-func NewClient(rdb *redis.Client, keyPrefix string) *Client {
-	return &Client{rdb: rdb, keyPrefix: keyPrefix}
-}
-
-func NewFromEnv(cfg *config.RedisConfig) (*Client, error) {
+func NewCache(cfg *config.RedisConfig) (*Client, error) {
 	if cfg == nil {
 		return nil, errors.New("redis config is nil")
 	}
@@ -31,6 +27,12 @@ func NewFromEnv(cfg *config.RedisConfig) (*Client, error) {
 		Password: cfg.Password,
 		DB:       cfg.DB,
 	})
+	pingCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if err := rdb.Ping(pingCtx).Err(); err != nil {
+		_ = rdb.Close()
+		return nil, err
+	}
 	return &Client{rdb: rdb, keyPrefix: defaultKeyPrefix}, nil
 }
 

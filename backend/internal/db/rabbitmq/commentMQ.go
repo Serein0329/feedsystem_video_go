@@ -14,13 +14,13 @@ type CommentMQ struct {
 }
 
 const (
-	commentExchange   = "comment.events"
-	commentQueue      = "comment.events"
-	commentBindingKey = "comment.*"
+	CommentExchange   = "comment.events"
+	CommentQueue      = "comment.events"
+	CommentBindingKey = "comment.*"
 
-	commentPublishRK = "comment.publish"
-	commentDeleteRK  = "comment.delete"
-	commentMentionRK = "comment.mention"
+	CommentPublishRK = "comment.publish"
+	CommentDeleteRK  = "comment.delete"
+	CommentMentionRK = "comment.mention"
 )
 
 type CommentEvent struct {
@@ -37,21 +37,21 @@ type CommentEvent struct {
 
 func NewCommentMQ(base *RabbitMQ) (*CommentMQ, error) {
 	if base == nil {
-		return nil, errors.New("rabbitmq base is nil")
+		return nil, errors.New("rabbitmq is nil")
 	}
 	ch, err := base.NewChannel()
 	if err != nil {
 		return nil, err
 	}
-	if err := DeclareTopic(ch, commentExchange, commentQueue, commentBindingKey); err != nil {
-		ch.Close()
+	if err := DeclareTopic(ch, CommentExchange, CommentQueue, CommentBindingKey); err != nil {
+		_ = ch.Close()
 		return nil, err
 	}
 	return &CommentMQ{ch: ch}, nil
 }
 
 func (c *CommentMQ) Publish(ctx context.Context, username string, videoID, authorID uint, content string) error {
-	return c.publish(ctx, "publish", commentPublishRK, CommentEvent{
+	return c.publish(ctx, "publish", CommentPublishRK, CommentEvent{
 		Username: username,
 		VideoID:  videoID,
 		AuthorID: authorID,
@@ -60,13 +60,13 @@ func (c *CommentMQ) Publish(ctx context.Context, username string, videoID, autho
 }
 
 func (c *CommentMQ) Delete(ctx context.Context, commentID uint) error {
-	return c.publish(ctx, "delete", commentDeleteRK, CommentEvent{
+	return c.publish(ctx, "delete", CommentDeleteRK, CommentEvent{
 		CommentID: commentID,
 	})
 }
 
 func (c *CommentMQ) Mention(ctx context.Context, username string, videoID, authorID uint, mentionedIDs []uint) error {
-	return c.publish(ctx, "mention", commentMentionRK, CommentEvent{
+	return c.publish(ctx, "mention", CommentMentionRK, CommentEvent{
 		Username:     username,
 		VideoID:      videoID,
 		AuthorID:     authorID,
@@ -85,5 +85,5 @@ func (c *CommentMQ) publish(ctx context.Context, action, routingKey string, evt 
 	evt.EventID = id
 	evt.Action = action
 	evt.OccurredAt = time.Now()
-	return PublishJSON(ctx, c.ch, commentExchange, routingKey, evt)
+	return PublishJSON(ctx, c.ch, CommentExchange, routingKey, evt)
 }

@@ -2,7 +2,8 @@ package rabbitmq
 
 import (
 	"errors"
-	"log"
+	"feedsystem_video_go/internal/pkg/logger"
+	"log/slog"
 )
 
 const (
@@ -17,19 +18,19 @@ var notificationTopics = []struct {
 	queue      string
 	bindingKey string
 }{
-	{likeExchange, NotificationLikeQueue, likeLikeRK},
-	{commentExchange, NotificationCommentQueue, commentPublishRK},
-	{socialExchange, NotificationSocialQueue, socialFollowRK},
-	{commentExchange, NotificationMentionQueue, commentMentionRK},
+	{LikeExchange, NotificationLikeQueue, LikeLikeRK},
+	{CommentExchange, NotificationCommentQueue, CommentPublishRK},
+	{SocialExchange, NotificationSocialQueue, SocialFollowRK},
+	{CommentExchange, NotificationMentionQueue, CommentMentionRK},
 }
 
 func NotificationQueues() []string {
 	return []string{NotificationLikeQueue, NotificationCommentQueue, NotificationSocialQueue, NotificationMentionQueue}
 }
 
-func DeclareNotificationTopics(base *RabbitMQ) error {
+func NewNotificationMQ(base *RabbitMQ) error {
 	if base == nil {
-		return errors.New("rabbitmq base is nil")
+		return errors.New("rabbitmq is nil")
 	}
 	ch, err := base.NewChannel()
 	if err != nil {
@@ -40,7 +41,7 @@ func DeclareNotificationTopics(base *RabbitMQ) error {
 	var firstErr error
 	for _, t := range notificationTopics {
 		if err := DeclareTopic(ch, t.exchange, t.queue, t.bindingKey); err != nil {
-			log.Printf("notification topic init failed: exchange=%s queue=%s: %v", t.exchange, t.queue, err)
+			logger.Info("NotificationMQ init failed", slog.String("exchange", t.exchange), slog.String("queue", t.queue), slog.Any("error", err))
 			if firstErr == nil {
 				firstErr = err
 			}

@@ -3,6 +3,8 @@ package video
 import (
 	"context"
 	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/pkg/logger"
+	"log/slog"
 	"strconv"
 	"time"
 )
@@ -13,10 +15,12 @@ func UpdatePopularityCache(ctx context.Context, cache *rediscache.Client, id uin
 		return
 	}
 
-	_ = cache.Del(ctx, cache.Key("video:%d", id))
-
+	cacheKey := cache.Key("video:entity:%d", id)
+	if err := cache.Del(ctx, cacheKey); err != nil {
+		logger.Info("Del cache failed", slog.String("key", cacheKey), slog.Any("error", err))
+	}
 	now := time.Now()
-	windowKey := cache.Key("hot:video:1m:%s", now.Format("200601021504"))
+	windowKey := cache.Key("video:hot:%s", now.Format("200601021504"))
 	member := strconv.FormatUint(uint64(id), 10)
 
 	opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)

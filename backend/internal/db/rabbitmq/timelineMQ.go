@@ -14,10 +14,10 @@ type TimelineMQ struct {
 }
 
 const (
-	timelineExchange   = "video.timeline.events"
-	timelineQueue      = "video.timeline.events"
-	timelineBindingKey = "video.timeline.*"
-	timelinePublishRK  = "video.timeline.publish"
+	TimelineExchange   = "video.timeline.events"
+	TimelineQueue      = "video.timeline.events"
+	TimelineBindingKey = "video.timeline.*"
+	TimelinePublishRK  = "video.timeline.publish"
 )
 
 type TimelineEvent struct {
@@ -29,13 +29,13 @@ type TimelineEvent struct {
 
 func NewTimelineMQ(base *RabbitMQ) (*TimelineMQ, error) {
 	if base == nil {
-		return nil, errors.New("rabbitmq base is nil")
+		return nil, errors.New("rabbitmq is nil")
 	}
 	ch, err := base.NewChannel()
 	if err != nil {
 		return nil, err
 	}
-	if err := DeclareTopic(ch, timelineExchange, timelineQueue, timelineBindingKey); err != nil {
+	if err := DeclareTopic(ch, TimelineExchange, TimelineQueue, TimelineBindingKey); err != nil {
 		_ = ch.Close()
 		return nil, err
 	}
@@ -56,5 +56,5 @@ func (t *TimelineMQ) PublishVideo(ctx context.Context, videoID uint, createTime 
 		CreateTime: createTime.UnixMilli(),
 		OccurredAt: time.Now(),
 	}
-	return PublishJSON(ctx, t.ch, timelineExchange, timelinePublishRK, timeline)
+	return PublishJSON(ctx, t.ch, TimelineExchange, TimelinePublishRK, timeline)
 }

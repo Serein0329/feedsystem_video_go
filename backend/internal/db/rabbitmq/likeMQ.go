@@ -14,12 +14,12 @@ type LikeMQ struct {
 }
 
 const (
-	likeExchange   = "like.events"
-	likeQueue      = "like.events"
-	likeBindingKey = "like.*"
+	LikeExchange   = "like.events"
+	LikeQueue      = "like.events"
+	LikeBindingKey = "like.*"
 
-	likeLikeRK   = "like.like"
-	likeUnlikeRK = "like.unlike"
+	LikeLikeRK   = "like.like"
+	LikeUnlikeRK = "like.unlike"
 )
 
 type LikeEvent struct {
@@ -32,13 +32,13 @@ type LikeEvent struct {
 
 func NewLikeMQ(base *RabbitMQ) (*LikeMQ, error) {
 	if base == nil {
-		return nil, errors.New("rabbitmq base is nil")
+		return nil, errors.New("rabbitmq is nil")
 	}
 	ch, err := base.NewChannel()
 	if err != nil {
 		return nil, err
 	}
-	if err := DeclareTopic(ch, likeExchange, likeQueue, likeBindingKey); err != nil {
+	if err := DeclareTopic(ch, LikeExchange, LikeQueue, LikeBindingKey); err != nil {
 		_ = ch.Close()
 		return nil, err
 	}
@@ -46,11 +46,11 @@ func NewLikeMQ(base *RabbitMQ) (*LikeMQ, error) {
 }
 
 func (l *LikeMQ) Like(ctx context.Context, userID, videoID uint) error {
-	return l.publish(ctx, "like", likeLikeRK, userID, videoID)
+	return l.publish(ctx, "like", LikeLikeRK, userID, videoID)
 }
 
 func (l *LikeMQ) Unlike(ctx context.Context, userID, videoID uint) error {
-	return l.publish(ctx, "unlike", likeUnlikeRK, userID, videoID)
+	return l.publish(ctx, "unlike", LikeUnlikeRK, userID, videoID)
 }
 
 func (l *LikeMQ) publish(ctx context.Context, action, routingKey string, userID, videoID uint) error {
@@ -68,5 +68,5 @@ func (l *LikeMQ) publish(ctx context.Context, action, routingKey string, userID,
 		VideoID:    videoID,
 		OccurredAt: time.Now(),
 	}
-	return PublishJSON(ctx, l.ch, likeExchange, routingKey, event)
+	return PublishJSON(ctx, l.ch, LikeExchange, routingKey, event)
 }

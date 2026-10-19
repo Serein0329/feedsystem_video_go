@@ -9,12 +9,14 @@ import (
 	"feedsystem_video_go/internal/message"
 	"feedsystem_video_go/internal/mw"
 	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/pkg/response"
 	"feedsystem_video_go/internal/social"
 	"feedsystem_video_go/internal/sse"
 	"feedsystem_video_go/internal/video"
 	"feedsystem_video_go/internal/worker"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -76,12 +78,12 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 
 	//video
 	videoRepository := video.NewVideoRepository(db)
-	popularityMQ, err := rabbitmq2.NewPopularityMQ(rmq)
+	timelineMQ, err := rabbitmq2.NewTimelineMQ(rmq)
 	if err != nil {
-		log.Printf("PopularityMQ init failed: %v", err)
-		popularityMQ = nil
+		logger.Info("PopularityMQ init failed", slog.Any("error", err))
+		timelineMQ = nil
 	}
-	videoService := video.NewVideoService(videoRepository, cache, popularityMQ)
+	videoService := video.NewVideoService(videoRepository, cache, timelineMQ)
 	videoHandler := video.NewVideoHandler(videoService, accountService)
 	chunkHandler := video.NewChunkUploadHandler(cache)
 	videoGroup := r.Group("/video")
@@ -105,15 +107,18 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	// like
 	likeMQ, err := rabbitmq2.NewLikeMQ(rmq)
 	if err != nil {
-		log.Printf("LikeMQ init failed: %v", err)
+		logger.Info("LikeMQ init failed", slog.Any("error", err))
 		likeMQ = nil
+	}
+	popularityMQ, err := rabbitmq2.NewPopularityMQ(rmq)
+	if err != nil {
+		logger.Info("PopularityMQ init failed", slog.Any("error", err))
+		popularityMQ = nil
 	}
 	likeRepository := video.NewLikeRepository(db)
 	likeService := video.NewLikeService(likeRepository, videoRepository, cache, likeMQ, popularityMQ)
 	likeHandler := video.NewLikeHandler(likeService)
-	likeGroup := r.Group("/like")
-	protectedLikeGroup := likeGroup.Group("")
-	protectedLikeGroup.Use(mw.JWTAuthHandler(accountRepository, cache, true))
+	protectedLikeGroup := r.Group("/like").Use(mw.JWTAuthHandler(accountRepository, cache, true))
 	{
 		protectedLikeGroup.POST("/like", likeLimiter, likeHandler.Like)
 		protectedLikeGroup.POST("/unlike", likeLimiter, likeHandler.Unlike)
@@ -122,12 +127,12 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	}
 
 	// comment
-	commentRepository := video.NewCommentRepository(db)
 	commentMQ, err := rabbitmq2.NewCommentMQ(rmq)
 	if err != nil {
-		log.Printf("CommentMQ init failed: %v", err)
+		logger.Info("CommentMQ init failed", slog.Any("error", err))
 		commentMQ = nil
 	}
+	commentRepository := video.NewCommentRepository(db)
 	commentService := video.NewCommentService(commentRepository, videoRepository, cache, commentMQ, popularityMQ)
 	commentHandler := video.NewCommentHandler(commentService, accountService)
 	commentGroup := r.Group("/comment")
@@ -240,16 +245,10 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	notifGroup.POST("/unreadCount", sseHub.UnreadCountHandler)
 
 	//Worker
-	timelineMQ, err := rabbitmq2.NewTimelineMQ(rmq)
-	if err != nil {
-		log.Printf("timelineMQ init failed: %v", err)
-		timelineMQ = nil
-	}
-	worker.StartProducer(db, timelineMQ)
-	worker.StartConsumer("video.timeline.events", cache, rmq)
+	worker.StartOutboxConsumer("video.timeline.events", cache, rmq)
 	go func() {
 		if rmq != nil {
-			if err := rabbitmq2.DeclareNotificationTopics(rmq); err != nil {
+			if err := rabbitmq2.NewNotificationMQ(rmq); err != nil {
 				log.Printf("notification topics init failed: %v", err)
 			}
 			if err := worker.NewNotificationWorker(rmq, db, sseHub).Run(context.Background()); err != nil {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"feedsystem_video_go/internal/config"
 	"feedsystem_video_go/internal/db/mysql"
 	"feedsystem_video_go/internal/db/rabbitmq"
@@ -10,7 +9,6 @@ import (
 	"feedsystem_video_go/internal/pkg/logger"
 	"log/slog"
 	"os"
-	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -51,27 +49,19 @@ func main() {
 	defer func() { _ = mysql.CloseDB(sqlDB) }()
 
 	// 连接 Redis (可选，用于缓存)
-	cache, err := rediscache.NewFromEnv(&cfg.Redis)
+	cache, err := rediscache.NewCache(&cfg.Redis)
 	if err != nil {
-		logger.Warn("Redis config error", slog.Any("error", err))
+		logger.Warn("Redis connect failed", slog.Any("error", err))
 		cache = nil
 	} else {
-		pingCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		if err := cache.Ping(pingCtx); err != nil {
-			logger.Warn("Redis not available", slog.Any("error", err))
-			_ = cache.Close()
-			cache = nil
-		} else {
-			defer func() { _ = cache.Close() }()
-			logger.Info("Redis connected")
-		}
-		cancel()
+		defer func() { _ = cache.Close() }()
+		logger.Info("Redis connected")
 	}
 
 	// 连接 RabbitMQ (可选，用于消息队列)
 	rmq, err := rabbitmq.NewRabbitMQ(&cfg.RabbitMQ)
 	if err != nil {
-		logger.Warn("RabbitMQ config error", slog.Any("error", err))
+		logger.Warn("RabbitMQ connect failed", slog.Any("error", err))
 		rmq = nil
 	} else {
 		defer func() { _ = rmq.Close() }()

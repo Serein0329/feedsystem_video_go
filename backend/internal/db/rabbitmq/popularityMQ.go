@@ -14,11 +14,11 @@ type PopularityMQ struct {
 }
 
 const (
-	popularityExchange   = "video.popularity.events"
-	popularityQueue      = "video.popularity.events"
-	popularityBindingKey = "video.popularity.*"
+	PopularityExchange   = "video.popularity.events"
+	PopularityQueue      = "video.popularity.events"
+	PopularityBindingKey = "video.popularity.*"
 
-	popularityUpdateRK = "video.popularity.update"
+	PopularityUpdateRK = "video.popularity.update"
 )
 
 type PopularityEvent struct {
@@ -30,13 +30,13 @@ type PopularityEvent struct {
 
 func NewPopularityMQ(base *RabbitMQ) (*PopularityMQ, error) {
 	if base == nil {
-		return nil, errors.New("rabbitmq base is nil")
+		return nil, errors.New("rabbitmq is nil")
 	}
 	ch, err := base.NewChannel()
 	if err != nil {
 		return nil, err
 	}
-	if err := DeclareTopic(ch, popularityExchange, popularityQueue, popularityBindingKey); err != nil {
+	if err := DeclareTopic(ch, PopularityExchange, PopularityQueue, PopularityBindingKey); err != nil {
 		ch.Close()
 		return nil, err
 	}
@@ -57,5 +57,5 @@ func (p *PopularityMQ) Update(ctx context.Context, videoID uint, change int64) e
 		Change:     change,
 		OccurredAt: time.Now(),
 	}
-	return PublishJSON(ctx, p.ch, popularityExchange, popularityUpdateRK, event)
+	return PublishJSON(ctx, p.ch, PopularityExchange, PopularityUpdateRK, event)
 }

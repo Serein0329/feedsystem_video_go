@@ -14,12 +14,12 @@ type SocialMQ struct {
 }
 
 const (
-	socialExchange   = "social.events"
-	socialQueue      = "social.events"
-	socialBindingKey = "social.*"
+	SocialExchange   = "social.events"
+	SocialQueue      = "social.events"
+	SocialBindingKey = "social.*"
 
-	socialFollowRK   = "social.follow"
-	socialUnfollowRK = "social.unfollow"
+	SocialFollowRK   = "social.follow"
+	SocialUnfollowRK = "social.unfollow"
 )
 
 type SocialEvent struct {
@@ -32,13 +32,13 @@ type SocialEvent struct {
 
 func NewSocialMQ(base *RabbitMQ) (*SocialMQ, error) {
 	if base == nil {
-		return nil, errors.New("rabbitmq base is nil")
+		return nil, errors.New("rabbitmq is nil")
 	}
 	ch, err := base.NewChannel()
 	if err != nil {
 		return nil, err
 	}
-	if err := DeclareTopic(ch, socialExchange, socialQueue, socialBindingKey); err != nil {
+	if err := DeclareTopic(ch, SocialExchange, SocialQueue, SocialBindingKey); err != nil {
 		ch.Close()
 		return nil, err
 	}
@@ -46,11 +46,11 @@ func NewSocialMQ(base *RabbitMQ) (*SocialMQ, error) {
 }
 
 func (s *SocialMQ) Follow(ctx context.Context, followerID, vloggerID uint) error {
-	return s.publish(ctx, "follow", socialFollowRK, followerID, vloggerID)
+	return s.publish(ctx, "follow", SocialFollowRK, followerID, vloggerID)
 }
 
 func (s *SocialMQ) UnFollow(ctx context.Context, followerID, vloggerID uint) error {
-	return s.publish(ctx, "unfollow", socialUnfollowRK, followerID, vloggerID)
+	return s.publish(ctx, "unfollow", SocialUnfollowRK, followerID, vloggerID)
 }
 
 func (s *SocialMQ) publish(ctx context.Context, action, routingKey string, followerID, vloggerID uint) error {
@@ -71,5 +71,5 @@ func (s *SocialMQ) publish(ctx context.Context, action, routingKey string, follo
 		VloggerID:  vloggerID,
 		OccurredAt: time.Now(),
 	}
-	return PublishJSON(ctx, s.ch, socialExchange, routingKey, evt)
+	return PublishJSON(ctx, s.ch, SocialExchange, routingKey, evt)
 }
