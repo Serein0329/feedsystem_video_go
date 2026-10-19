@@ -7,8 +7,8 @@ import (
 	"feedsystem_video_go/internal/db/rabbitmq"
 	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/pkg/apierror"
-	"log"
-	"strconv"
+	"feedsystem_video_go/internal/pkg/logger"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -32,24 +32,21 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 	video.PlayURL = strings.TrimSpace(video.PlayURL)
 	video.CoverURL = strings.TrimSpace(video.CoverURL)
 
-	//事务保证视频写入库和消息写入本地消息表的一致性
+	tags := ExtractTags(video.Description)
+	msg := OutboxMsg{
+		VideoID:    video.ID,
+		EventType:  "video_published",
+		Status:     "pending",
+		CreateTime: video.CreateTime,
+	}
 	err := vs.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(video).Error; err != nil {
 			return err
 		}
-
-		msg := OutboxMsg{
-			VideoID:    video.ID,
-			EventType:  "video_published",
-			Status:     "pending",
-			CreateTime: video.CreateTime,
-		}
-
 		if err := tx.Create(&msg).Error; err != nil {
 			return err
 		}
 
-		tags := ExtractTags(video.Description)
 		for _, tagName := range tags {
 			var tag Tag
 			if err := tx.Where("name = ?", tagName).FirstOrCreate(&tag, Tag{Name: tagName}).Error; err != nil {
@@ -78,7 +75,7 @@ func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) erro
 	if vs.cache != nil {
 		cacheKey := vs.cache.Key("video:%d", id)
 		if err = vs.cache.Del(context.Background(), cacheKey); err != nil {
-			log.Printf("failed to delete cache key:%s, err:%v", cacheKey, err)
+			logger.Info("Del cache failed", slog.String("key", cacheKey), slog.Any("error", err))
 		}
 	}
 	return nil
@@ -118,7 +115,7 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 		if err := vs.cache.SetBytes(opCtx, cacheKey, b, vs.cacheTTL); err != nil {
-			log.Printf("failed to set cache key:%s, err:%v", cacheKey, err)
+			logger.Info("Set cache failed", slog.String("key", cacheKey), slog.Any("error", err))
 		}
 	}
 
@@ -133,7 +130,7 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 			lockCancel()
 
 			if lockErr == nil && locked {
-				defer func() { _ = vs.cache.Unlock(context.Background(), lockKey, token) }()
+				defer func() { _ = vs.cache.Unlock(ctx, lockKey, token) }()
 				if v, err := getCached(); err == nil {
 					return v, nil
 				}
@@ -168,40 +165,4 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 		setCached(video)
 	}
 	return video, nil
-}
-
-func (vs *VideoService) UpdateLikesCount(ctx context.Context, id uint, likesCount int64) error {
-	if err := vs.repo.UpdateLikesCount(ctx, id, likesCount); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (vs *VideoService) UpdatePopularity(ctx context.Context, id uint, change int64) error {
-	if err := vs.repo.UpdatePopularity(ctx, id, change); err != nil {
-		return err
-	}
-
-	if vs.popularityMQ != nil {
-		if err := vs.popularityMQ.Update(ctx, id, change); err == nil {
-			return nil
-		}
-	}
-
-	if vs.cache != nil {
-		// 1) 详情缓存：直接失效（最简单靠谱）
-		_ = vs.cache.Del(context.Background(), vs.cache.Key("video:%d", id))
-
-		// 2) 热榜：写到“时间窗ZSET”，不要用 detail key
-		now := time.Now().UTC().Truncate(time.Minute)
-		windowKey := vs.cache.Key("hot:video:1m:%s", now.Format("200601021504"))
-		member := strconv.FormatUint(uint64(id), 10)
-
-		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-		defer cancel()
-
-		_ = vs.cache.ZincrBy(opCtx, windowKey, member, float64(change))
-		_ = vs.cache.Expire(opCtx, windowKey, 2*time.Hour)
-	}
-	return nil
 }

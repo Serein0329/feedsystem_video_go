@@ -44,16 +44,13 @@ func (vh *VideoHandler) PublishVideo(c *gin.Context) {
 		CreateTime:  time.Now(),
 	}
 	if err := vh.service.Publish(c.Request.Context(), video); err != nil {
-		response.FailByErr(c, err)
-	} else {
-		response.Success(c, video)
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		return
 	}
-
+	response.Success(c, video)
 }
 
 func (vh *VideoHandler) UploadVideo(c *gin.Context) {
-	authorId, _ := mw.GetAccountIDByGIN(c)
-
 	f, err := c.FormFile("file")
 	if err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
@@ -62,7 +59,7 @@ func (vh *VideoHandler) UploadVideo(c *gin.Context) {
 
 	const maxSize = 200 << 20
 	if f.Size <= 0 || f.Size > maxSize {
-		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size must be between 0 and 200"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size max 200MB"})
 		return
 	}
 
@@ -71,7 +68,7 @@ func (vh *VideoHandler) UploadVideo(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .mp4 is allowed"})
 		return
 	}
-
+	authorId, _ := mw.GetAccountIDByGIN(c)
 	date := time.Now().Format("20060102")
 	relDir := filepath.Join("videos", fmt.Sprintf("%d", authorId), date)
 	root := filepath.Join(".run", "uploads")
@@ -100,8 +97,6 @@ func (vh *VideoHandler) UploadVideo(c *gin.Context) {
 }
 
 func (vh *VideoHandler) UploadCover(c *gin.Context) {
-	authorId, _ := mw.GetAccountIDByGIN(c)
-
 	f, err := c.FormFile("file")
 	if err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
@@ -110,7 +105,7 @@ func (vh *VideoHandler) UploadCover(c *gin.Context) {
 
 	const maxSize = 10 << 20
 	if f.Size <= 0 || f.Size > maxSize {
-		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size must be between 0 and 1000"})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size max 10MB"})
 		return
 	}
 
@@ -122,6 +117,7 @@ func (vh *VideoHandler) UploadCover(c *gin.Context) {
 		return
 	}
 
+	authorId, _ := mw.GetAccountIDByGIN(c)
 	date := time.Now().Format("20060102")
 	relDir := filepath.Join("covers", fmt.Sprintf("%d", authorId), date)
 	root := filepath.Join(".run", "uploads")
@@ -143,7 +139,6 @@ func (vh *VideoHandler) UploadCover(c *gin.Context) {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-
 	urlPath := path.Join("/static", "covers", fmt.Sprintf("%d", authorId), date, filename)
 
 	response.Success(c, gin.H{"cover_url": buildAbsoluteURL(c, urlPath)})
@@ -169,6 +164,15 @@ func (vh *VideoHandler) ListByAuthorID(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	isExist, err := vh.accountService.IsExist(c.Request.Context(), req.AuthorID)
+	if err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		return
+	}
+	if !isExist {
+		response.FailByErrCode(c, apierror.ErrUserNotFound)
+		return
+	}
 	videos, err := vh.service.ListByAuthorID(c.Request.Context(), req.AuthorID)
 	if err != nil {
 		response.FailByErr(c, err)
@@ -192,19 +196,6 @@ func (vh *VideoHandler) GetDetail(c *gin.Context) {
 		return
 	}
 	response.Success(c, video)
-}
-
-func (vh *VideoHandler) UpdateLikesCount(c *gin.Context) {
-	var req UpdateLikesCountRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		//c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
-		return
-	}
-	if err := vh.service.UpdateLikesCount(c.Request.Context(), req.ID, req.LikesCount); err != nil {
-		response.FailByErr(c, err)
-		return
-	}
-	response.Success(c, nil)
 }
 
 func buildAbsoluteURL(c *gin.Context, p string) string {

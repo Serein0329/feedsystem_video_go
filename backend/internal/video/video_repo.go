@@ -50,33 +50,12 @@ func (vr *VideoRepository) GetByID(ctx context.Context, id uint) (*Video, error)
 	return &video, nil
 }
 
-func (vr *VideoRepository) UpdateLikesCount(ctx context.Context, id uint, likesCount int64) error {
-	var count int64
-	if err := vr.db.Model(&Video{}).Where("id = ?", id).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return apierror.ErrVideoNotFound
-	}
-	return vr.db.Model(&Video{}).Where("id = ?", id).
-		Update("likes_count", likesCount).Error
-}
-
 func (vr *VideoRepository) IsExist(ctx context.Context, id uint) (bool, error) {
 	var count int64
 	if err := vr.db.WithContext(ctx).Model(&Video{}).Where("id = ?", id).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
-}
-
-func (vr *VideoRepository) UpdatePopularity(ctx context.Context, id uint, change int64) error {
-	if err := vr.db.WithContext(ctx).Model(&Video{}).
-		Where("id = ?", id).
-		Update("popularity", gorm.Expr("popularity + ?", change)).Error; err != nil {
-		return err
-	}
-	return nil
 }
 
 func (vr *VideoRepository) ChangeLikesCount(ctx context.Context, id uint, change int64) error {

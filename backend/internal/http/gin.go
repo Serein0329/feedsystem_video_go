@@ -71,7 +71,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 		protectedAccountGroup.POST("/rename", accountHandler.Rename)
 		protectedAccountGroup.POST("/changePassword", accountHandler.ChangePassword)
 		protectedAccountGroup.POST("/uploadAvatar", accountHandler.UploadAvatar)
-		protectedAccountGroup.POST("/updateProfile", accountHandler.UpdateProfile)
+		protectedAccountGroup.POST("/updateBio", accountHandler.UpdateBio)
 	}
 
 	//video
@@ -93,6 +93,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	protectedVideoGroup.Use(mw.JWTAuthHandler(accountRepository, cache, true))
 	{
 		protectedVideoGroup.POST("/uploadVideo", videoHandler.UploadVideo)
+		protectedVideoGroup.POST("/deleteVideo", videoHandler.DeleteVideo)
 		protectedVideoGroup.POST("/uploadCover", videoHandler.UploadCover)
 		protectedVideoGroup.POST("/publish", videoHandler.PublishVideo)
 		protectedVideoGroup.POST("/chunk/init", chunkHandler.InitChunkUpload)

@@ -27,7 +27,7 @@ type DeleteVideoRequest struct {
 }
 
 type ListByAuthorIDRequest struct {
-	AuthorID uint `json:"author_id" validate:"required"`
+	AuthorID uint `json:"author_id" binding:"required"`
 }
 
 type GetDetailRequest struct {
@@ -40,8 +40,8 @@ type UpdateLikesCountRequest struct {
 }
 
 type OutboxMsg struct {
-	ID         uint      `gorm:"primaryKey"`
-	VideoID    uint      `gorm:"index"`
+	ID         uint `gorm:"primaryKey"`
+	VideoID    uint
 	EventType  string    `gorm:"type:varchar(50)"`
 	CreateTime time.Time `gorm:"autoCreateTime"`
 	Status     string    `gorm:"type:varchar(50);index"`
