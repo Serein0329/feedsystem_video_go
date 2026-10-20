@@ -50,9 +50,9 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	loginLimiter := mw.LimitHandler(cache, "account_login", 10, time.Minute, mw.KeyByIP)
 	registerLimiter := mw.LimitHandler(cache, "account_register", 5, time.Hour, mw.KeyByIP)
 	refreshLimiter := mw.LimitHandler(cache, "account_refresh", 20, time.Hour, mw.KeyByIP)
-	likeLimiter := mw.LimitHandler(cache, "like_write", 30, time.Minute, mw.KeyByAccount)
-	commentLimiter := mw.LimitHandler(cache, "comment_write", 10, time.Minute, mw.KeyByAccount)
-	socialLimiter := mw.LimitHandler(cache, "social_write", 20, time.Minute, mw.KeyByAccount)
+	likeLimiter := mw.LimitHandler(cache, "video_like", 30, time.Minute, mw.KeyByAccount)
+	commentLimiter := mw.LimitHandler(cache, "video_comment", 10, time.Minute, mw.KeyByAccount)
+	socialLimiter := mw.LimitHandler(cache, "social_follow", 20, time.Minute, mw.KeyByAccount)
 
 	// account
 	accountRepository := account.NewAccountRepository(db)
@@ -64,6 +64,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 		accountGroup.POST("/login", loginLimiter, accountHandler.Login)
 		accountGroup.POST("/findByID", accountHandler.FindByID)
 		accountGroup.POST("/findByUsername", accountHandler.FindByUsername)
+		accountGroup.POST("/findSimilarName", accountHandler.FindSimilarName)
 		accountGroup.POST("/refresh", refreshLimiter, accountHandler.Refresh)
 	}
 	protectedAccountGroup := accountGroup.Group("")
@@ -73,7 +74,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 		protectedAccountGroup.POST("/rename", accountHandler.Rename)
 		protectedAccountGroup.POST("/changePassword", accountHandler.ChangePassword)
 		protectedAccountGroup.POST("/uploadAvatar", accountHandler.UploadAvatar)
-		protectedAccountGroup.POST("/updateBio", accountHandler.UpdateBio)
+		protectedAccountGroup.POST("/updateProfile", accountHandler.UpdateProfile)
 	}
 
 	//video
@@ -90,6 +91,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	{
 		videoGroup.POST("/listByAuthorID", videoHandler.ListByAuthorID)
 		videoGroup.POST("/getDetail", videoHandler.GetDetail)
+		videoGroup.POST("/search", videoHandler.SearchVideos)
 	}
 	protectedVideoGroup := videoGroup.Group("")
 	protectedVideoGroup.Use(mw.JWTAuthHandler(accountRepository, cache, true))
@@ -118,7 +120,8 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	likeRepository := video.NewLikeRepository(db)
 	likeService := video.NewLikeService(likeRepository, videoRepository, cache, likeMQ, popularityMQ)
 	likeHandler := video.NewLikeHandler(likeService)
-	protectedLikeGroup := r.Group("/like").Use(mw.JWTAuthHandler(accountRepository, cache, true))
+	protectedLikeGroup := r.Group("/like")
+	protectedLikeGroup.Use(mw.JWTAuthHandler(accountRepository, cache, true))
 	{
 		protectedLikeGroup.POST("/like", likeLimiter, likeHandler.Like)
 		protectedLikeGroup.POST("/unlike", likeLimiter, likeHandler.Unlike)

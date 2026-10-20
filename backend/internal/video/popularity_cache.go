@@ -26,6 +26,10 @@ func UpdatePopularityCache(ctx context.Context, cache *rediscache.Client, id uin
 	opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancel()
 
-	_ = cache.ZincrBy(opCtx, windowKey, member, float64(change))
-	_ = cache.Expire(opCtx, windowKey, 2*time.Hour)
+	if err := cache.ZincrBy(opCtx, windowKey, member, float64(change)); err != nil {
+		logger.Info("Zincr cache  failed", slog.String("key", windowKey), slog.Any("error", err))
+	}
+	if err := cache.Expire(opCtx, windowKey, 2*time.Hour); err != nil {
+		logger.Info("Set cache expire failed", slog.String("key", windowKey), slog.Any("error", err))
+	}
 }

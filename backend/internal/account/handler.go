@@ -29,7 +29,8 @@ func (h *AccountHandler) CreateAccount(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if strings.TrimSpace(req.Username) == "" {
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "用户名不为空"})
 		return
 	}
@@ -44,6 +45,11 @@ func (h *AccountHandler) Rename(c *gin.Context) {
 	var req RenameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.NewUsername = strings.TrimSpace(req.NewUsername)
+	if req.NewUsername == "" {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "用户名不为空"})
 		return
 	}
 	accountID, _ := getAccountIDByGIN(c)
@@ -88,11 +94,41 @@ func (h *AccountHandler) FindByUsername(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, "查询用户名为空")
+		return
+	}
 	if account, err := h.accountService.FindByUsername(c.Request.Context(), req.Username); err != nil {
 		response.FailByErr(c, err)
 	} else {
 		response.Success(c, account)
 	}
+}
+
+func (h *AccountHandler) FindSimilarName(c *gin.Context) {
+	var req FindSimilarNameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, "查询用户名为空")
+		return
+	}
+	if req.Limit <= 0 || req.Limit > 50 {
+		req.Limit = 20
+	}
+	res, err := h.accountService.FindSimilarName(c.Request.Context(), req.Username, req.LastID, req.Limit)
+	if err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		return
+	}
+	if len(res.Accounts) == 0 {
+		res.Accounts = []*Account{}
+	}
+	response.Success(c, res)
 }
 
 func (h *AccountHandler) Login(c *gin.Context) {
@@ -158,22 +194,17 @@ func (h *AccountHandler) UploadAvatar(c *gin.Context) {
 		return
 	}
 	urlPath := path.Join("/static", "avatars", strconv.FormatUint(uint64(accountID), 10), filename)
-	avatarURL := buildAbsoluteURL(c, urlPath)
-	if err := h.accountService.UpdateAvatar(c.Request.Context(), accountID, avatarURL); err != nil {
-		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
-		return
-	}
-	response.Success(c, gin.H{"avatar_url": avatarURL})
+	response.Success(c, gin.H{"avatar_url": buildAbsoluteURL(c, urlPath)})
 }
 
-func (h *AccountHandler) UpdateBio(c *gin.Context) {
-	var req UpdateBioRequest
+func (h *AccountHandler) UpdateProfile(c *gin.Context) {
+	var req UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	accountID, _ := getAccountIDByGIN(c)
-	if err := h.accountService.UpdateBio(c.Request.Context(), accountID, req.Bio); err != nil {
+	if err := h.accountService.UpdateProfile(c.Request.Context(), accountID, req.Bio, req.AvatarURL); err != nil {
 		response.FailByErr(c, err)
 		return
 	}

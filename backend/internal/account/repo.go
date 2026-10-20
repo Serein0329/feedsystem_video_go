@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"feedsystem_video_go/internal/pkg/apierror"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -74,6 +75,19 @@ func (ar *AccountRepository) FindByUsername(ctx context.Context, username string
 	return &account, nil
 }
 
+func (ar *AccountRepository) FindSimilarName(ctx context.Context, username string, lastID uint, limit int) ([]*Account, error) {
+	var account []*Account
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(username)
+	query := ar.db.WithContext(ctx).Where(`username LIKE ? ESCAPE '\\'`, "%"+escaped+"%")
+	if lastID > 0 {
+		query = query.Where("id > ?", lastID)
+	}
+	if err := query.Order("id").Limit(limit).Find(&account).Error; err != nil {
+		return nil, err
+	}
+	return account, nil
+}
+
 func (ar *AccountRepository) IsExist(ctx context.Context, id uint) (bool, error) {
 	var count int64
 	if err := ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Count(&count).Error; err != nil {
@@ -90,16 +104,15 @@ func (ar *AccountRepository) Logout(ctx context.Context, id uint) error {
 	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(map[string]any{"token": "", "refresh_token": ""}).Error
 }
 
-func (ar *AccountRepository) UpdateAvatar(ctx context.Context, accountID uint, avatarURL string) error {
-	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", accountID).Update("avatar_url", avatarURL).Error
-}
-
 func (ar *AccountRepository) UpdateToken(ctx context.Context, id uint, token string) error {
 	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("token", token).Error
 }
 
-func (ar *AccountRepository) UpdateBio(ctx context.Context, id uint, bio string) error {
-	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("bio", bio).Error
+func (ar *AccountRepository) UpdateProfile(ctx context.Context, id uint, bio, avatarURL string) error {
+	return ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(map[string]any{
+		"bio":        bio,
+		"avatar_url": avatarURL,
+	}).Error
 }
 
 func (ar *AccountRepository) FindAll(ctx context.Context) ([]*Account, error) {

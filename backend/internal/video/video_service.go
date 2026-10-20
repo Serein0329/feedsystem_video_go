@@ -59,6 +59,22 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 	return nil
 }
 
+func (vs *VideoService) SearchVideos(ctx context.Context, keyword string, lastID uint, limit int) (SearchVideosResponse, error) {
+	videos, err := vs.repo.SearchByKeyword(ctx, keyword, lastID, limit)
+	if err != nil {
+		return SearchVideosResponse{}, err
+	}
+	if len(videos) == 0 {
+		// 保留请求传入的游标，避免客户端把 last_id=0 当成“重新从头查询”
+		return SearchVideosResponse{LastID: lastID}, nil
+	}
+	return SearchVideosResponse{
+		Videos:  videos,
+		HasMore: len(videos) == limit,
+		LastID:  videos[len(videos)-1].ID,
+	}, nil
+}
+
 func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) error {
 	video, err := vs.repo.GetByID(ctx, id)
 	if err != nil {

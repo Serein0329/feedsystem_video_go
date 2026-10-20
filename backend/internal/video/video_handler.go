@@ -31,7 +31,12 @@ func (vh *VideoHandler) PublishVideo(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	req.Title = strings.TrimSpace(req.Title)
+	if len(req.Title) == 0 {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "标题不为空"})
+	}
+	req.PlayURL = strings.TrimSpace(req.PlayURL)
+	req.CoverURL = strings.TrimSpace(req.CoverURL)
 	authorId, _ := mw.GetAccountIDByGIN(c)
 	username, _ := mw.GetUsernameByGIN(c)
 	video := &Video{
@@ -142,6 +147,31 @@ func (vh *VideoHandler) UploadCover(c *gin.Context) {
 	urlPath := path.Join("/static", "covers", fmt.Sprintf("%d", authorId), date, filename)
 
 	response.Success(c, gin.H{"cover_url": buildAbsoluteURL(c, urlPath)})
+}
+
+func (vh *VideoHandler) SearchVideos(c *gin.Context) {
+	var req SearchVideosRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Keyword = strings.TrimSpace(req.Keyword)
+	if req.Keyword == "" {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "搜索关键词不能为空"})
+		return
+	}
+	if req.Limit <= 0 || req.Limit > 50 {
+		req.Limit = 20
+	}
+	res, err := vh.service.SearchVideos(c.Request.Context(), req.Keyword, req.LastID, req.Limit)
+	if err != nil {
+		response.FailByErr(c, err)
+		return
+	}
+	if res.Videos == nil {
+		res.Videos = []*Video{}
+	}
+	response.Success(c, res)
 }
 
 func (vh *VideoHandler) DeleteVideo(c *gin.Context) {

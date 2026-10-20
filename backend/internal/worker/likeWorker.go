@@ -13,14 +13,13 @@ import (
 )
 
 type LikeWorker struct {
-	ch     *amqp.Channel
-	likes  *video.LikeRepository
-	videos *video.VideoRepository
-	queue  string
+	ch    *amqp.Channel
+	likes *video.LikeRepository
+	queue string
 }
 
 func NewLikeWorker(ch *amqp.Channel, likes *video.LikeRepository, videos *video.VideoRepository, queue string) *LikeWorker {
-	return &LikeWorker{ch: ch, likes: likes, videos: videos, queue: queue}
+	return &LikeWorker{ch: ch, likes: likes, queue: queue}
 }
 
 func (w *LikeWorker) Run(ctx context.Context) error {
@@ -103,24 +102,9 @@ func (w *LikeWorker) process(ctx context.Context, body []byte) error {
 }
 
 func (w *LikeWorker) applyLike(ctx context.Context, userID, videoID uint) error {
-	if err := w.likes.Like(ctx, &video.Like{
-		VideoID:   videoID,
-		AccountID: userID,
-	}); err != nil {
-		return err
-	}
-	if err := w.videos.ChangeLikesCount(ctx, videoID, 1); err != nil {
-		return err
-	}
-	return w.videos.ChangePopularity(ctx, videoID, 1)
+	return w.likes.Like(ctx, videoID, userID)
 }
 
 func (w *LikeWorker) applyUnlike(ctx context.Context, userID, videoID uint) error {
-	if err := w.likes.Unlike(ctx, &video.Like{AccountID: userID, VideoID: videoID}); err != nil {
-		return err
-	}
-	if err := w.videos.ChangeLikesCount(ctx, videoID, -1); err != nil {
-		return err
-	}
-	return w.videos.ChangePopularity(ctx, videoID, -1)
+	return w.likes.Unlike(ctx, videoID, userID)
 }

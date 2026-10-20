@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"feedsystem_video_go/internal/pkg/apierror"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -34,6 +35,22 @@ func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID uint) ([
 		Order("create_time desc").
 		Limit(200).
 		Find(&videos).Error; err != nil {
+		return nil, err
+	}
+	return videos, nil
+}
+
+func (vr *VideoRepository) SearchByKeyword(ctx context.Context, keyword string, lastID uint, limit int) ([]*Video, error) {
+	var videos []*Video
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(keyword)
+	pattern := "%" + escaped + "%"
+
+	query := vr.db.WithContext(ctx).
+		Where(`title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'`, pattern, pattern)
+	if lastID > 0 {
+		query = query.Where("id < ?", lastID)
+	}
+	if err := query.Order("id desc").Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil

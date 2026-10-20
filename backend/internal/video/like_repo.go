@@ -2,6 +2,7 @@ package video
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -14,24 +15,40 @@ func NewLikeRepository(db *gorm.DB) *LikeRepository {
 	return &LikeRepository{db: db}
 }
 
-func (r *LikeRepository) Like(ctx context.Context, like *Like) error {
-	return r.db.WithContext(ctx).Create(like).Error
+func (r *LikeRepository) Like(ctx context.Context, videoID, accountID uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Create(&Like{VideoID: videoID, AccountID: accountID}).Error
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&Video{}).Where("id = ?", videoID).
+			UpdateColumn("likes_count", gorm.Expr("likes_count + 1")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Video{}).Where("id = ?", videoID).
+			UpdateColumn("popularity", gorm.Expr("popularity + 1")).Error
+	})
 }
 
-func (r *LikeRepository) Unlike(ctx context.Context, like *Like) error {
-	return r.db.WithContext(ctx).
-		Where("video_id = ? AND account_id = ?", like.VideoID, like.AccountID).
-		Delete(&Like{}).Error
-}
-
-func (r *LikeRepository) DeleteByVideoAndAccount(ctx context.Context, videoID, accountID uint) (deleted bool, err error) {
-	if videoID == 0 || accountID == 0 {
-		return false, nil
-	}
-	res := r.db.WithContext(ctx).
-		Where("video_id = ? AND account_id = ?", videoID, accountID).
-		Delete(&Like{})
-	return res.RowsAffected > 0, res.Error
+func (r *LikeRepository) Unlike(ctx context.Context, videoID, accountID uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("video_id = ? AND account_id = ?", videoID, accountID).Delete(&Like{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil // 已经取消过，幂等，不再减
+		}
+		if err := tx.Model(&Video{}).Where("id = ?", videoID).
+			UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count - 1, 0)")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Video{}).Where("id = ?", videoID).
+			UpdateColumn("popularity", gorm.Expr("GREATEST(popularity - 1, 0)")).Error
+	})
 }
 
 func (r *LikeRepository) IsLiked(ctx context.Context, videoID, accountID uint) (bool, error) {

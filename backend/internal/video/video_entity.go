@@ -16,8 +16,8 @@ type Video struct {
 }
 
 type PublishVideoRequest struct {
-	Title       string `json:"title" binding:"required"`
-	Description string `json:"description"`
+	Title       string `json:"title" binding:"required,max=255"`
+	Description string `json:"description" binding:"max=255"`
 	PlayURL     string `json:"play_url" binding:"required,url"`
 	CoverURL    string `json:"cover_url" binding:"required,url"`
 }
@@ -34,7 +34,19 @@ type GetDetailRequest struct {
 	ID uint `json:"id" binding:"required"`
 }
 
+type SearchVideosRequest struct {
+	Keyword string `json:"keyword" binding:"required,max=50"`
+	Limit   int    `json:"limit"`
+	LastID  uint   `json:"last_id"`
+}
+
 type UpdateLikesCountRequest struct {
 	ID         uint  `json:"id"`
 	LikesCount int64 `json:"likes_count"`
+}
+
+type SearchVideosResponse struct {
+	Videos  []*Video `json:"videos"`
+	HasMore bool     `json:"has_more"`
+	LastID  uint     `json:"last_id"`
 }

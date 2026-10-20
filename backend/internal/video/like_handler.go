@@ -24,11 +24,7 @@ func (lh *LikeHandler) Like(c *gin.Context) {
 	}
 
 	accountID, _ := mw.GetAccountIDByGIN(c)
-	like := &Like{
-		VideoID:   req.VideoID,
-		AccountID: accountID,
-	}
-	if err := lh.service.Like(c.Request.Context(), like); err != nil {
+	if err := lh.service.Like(c.Request.Context(), req.VideoID, accountID); err != nil {
 		response.FailByErr(c, err)
 		return
 	}
@@ -67,7 +63,7 @@ func (lh *LikeHandler) IsLiked(c *gin.Context) {
 		response.FailByErr(c, err)
 		return
 	}
-	response.Success(c, gin.H{"isLiked": isLiked})
+	response.Success(c, gin.H{"is_liked": isLiked})
 }
 
 func (lh *LikeHandler) ListMyLikedVideos(c *gin.Context) {

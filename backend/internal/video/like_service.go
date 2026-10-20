@@ -5,9 +5,6 @@ import (
 	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
 	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/pkg/apierror"
-	"time"
-
-	"gorm.io/gorm"
 )
 
 type LikeService struct {
@@ -22,8 +19,8 @@ func NewLikeService(repo *LikeRepository, videoRepo *VideoRepository, cache *red
 	return &LikeService{repo: repo, VideoRepo: videoRepo, cache: cache, likeMQ: likeMQ, popularityMQ: popularityMQ}
 }
 
-func (s *LikeService) Like(ctx context.Context, like *Like) error {
-	ok, err := s.VideoRepo.IsExist(ctx, like.VideoID)
+func (s *LikeService) Like(ctx context.Context, videoID, accountID uint) error {
+	ok, err := s.VideoRepo.IsExist(ctx, videoID)
 	if err != nil {
 		return err
 	}
@@ -31,7 +28,7 @@ func (s *LikeService) Like(ctx context.Context, like *Like) error {
 		return apierror.ErrVideoNotFound
 	}
 
-	isLiked, err := s.repo.IsLiked(ctx, like.VideoID, like.AccountID)
+	isLiked, err := s.repo.IsLiked(ctx, videoID, accountID)
 	if err != nil {
 		return err
 	}
@@ -39,16 +36,15 @@ func (s *LikeService) Like(ctx context.Context, like *Like) error {
 		return nil
 	}
 
-	like.CreatedAt = time.Now()
 	mysqlEnqueued := false
 	redisEnqueued := false
 	if s.likeMQ != nil {
-		if err := s.likeMQ.Like(ctx, like.AccountID, like.VideoID); err == nil {
+		if err := s.likeMQ.Like(ctx, accountID, videoID); err == nil {
 			mysqlEnqueued = true
 		}
 	}
 	if s.popularityMQ != nil {
-		if err := s.popularityMQ.Update(ctx, like.VideoID, 1); err == nil {
+		if err := s.popularityMQ.Update(ctx, videoID, 1); err == nil {
 			redisEnqueued = true
 		}
 	}
@@ -57,24 +53,13 @@ func (s *LikeService) Like(ctx context.Context, like *Like) error {
 	}
 
 	if !mysqlEnqueued {
-		err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Create(&like).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&Video{}).Where("id = ?", like.VideoID).
-				UpdateColumn("likes_count", gorm.Expr("likes_count + 1")).Error; err != nil {
-				return err
-			}
-			return tx.Model(&Video{}).Where("id = ?", like.VideoID).
-				UpdateColumn("popularity", gorm.Expr("popularity + 1")).Error
-		})
-		if err != nil {
+		if err := s.repo.Like(ctx, videoID, accountID); err != nil {
 			return err
 		}
 	}
 
 	if !redisEnqueued {
-		UpdatePopularityCache(ctx, s.cache, like.VideoID, 1)
+		UpdatePopularityCache(ctx, s.cache, videoID, 1)
 	}
 	return nil
 }
@@ -113,19 +98,7 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 	}
 
 	if !mysqlEnqueued {
-		err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Where("video_id = ? AND account_id = ?", like.VideoID, like.AccountID).Delete(&Like{}).Error; err != nil {
-				return err
-			}
-			//GREATEST 返回参数里最大的那个值
-			if err := tx.Model(&Video{}).Where("id = ?", like.VideoID).
-				UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count - 1, 0)")).Error; err != nil {
-				return err
-			}
-			return tx.Model(&Video{}).Where("id = ?", like.VideoID).
-				UpdateColumn("popularity", gorm.Expr("GREATEST(popularity - 1, 0)")).Error
-		})
-		if err != nil {
+		if err := s.repo.Unlike(ctx, like.VideoID, like.AccountID); err != nil {
 			return err
 		}
 	}

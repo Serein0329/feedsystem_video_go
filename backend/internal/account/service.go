@@ -91,11 +91,26 @@ func (as *AccountService) FindByID(ctx context.Context, id uint) (*Account, erro
 }
 
 func (as *AccountService) FindByUsername(ctx context.Context, username string) (*Account, error) {
-	return as.accountRepository.FindByUsername(ctx, username)
+	return as.accountRepository.FindByUsername(ctx, strings.TrimSpace(username))
+}
+
+func (as *AccountService) FindSimilarName(ctx context.Context, username string, lastID uint, limit int) (FindSimilarNameResponse, error) {
+	accs, err := as.accountRepository.FindSimilarName(ctx, username, lastID, limit)
+	if err != nil {
+		return FindSimilarNameResponse{}, err
+	}
+	if len(accs) == 0 {
+		return FindSimilarNameResponse{LastID: lastID}, nil
+	}
+	return FindSimilarNameResponse{
+		Accounts: accs,
+		HasMore:  len(accs) == limit,
+		LastID:   accs[len(accs)-1].ID,
+	}, nil
 }
 
 func (as *AccountService) Login(ctx context.Context, username, password string) (LoginResponse, error) {
-	account, err := as.accountRepository.FindByUsername(ctx, username)
+	account, err := as.accountRepository.FindByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {
 		return LoginResponse{}, err
 	}
@@ -156,16 +171,10 @@ func (as *AccountService) Logout(ctx context.Context, accountID uint) error {
 	return as.accountRepository.Logout(ctx, account.ID)
 }
 
-func (as *AccountService) UpdateAvatar(ctx context.Context, accountID uint, avatarURL string) error {
-	return as.accountRepository.UpdateAvatar(ctx, accountID, avatarURL)
-}
-
-func (as *AccountService) UpdateBio(ctx context.Context, accountID uint, bio string) error {
+func (as *AccountService) UpdateProfile(ctx context.Context, accountID uint, bio, avatarURL string) error {
 	bio = strings.TrimSpace(bio)
-	if bio == "" {
-		return apierror.ErrUserNoFieldsToUpdate
-	}
-	return as.accountRepository.UpdateBio(ctx, accountID, bio)
+	avatarURL = strings.TrimSpace(avatarURL)
+	return as.accountRepository.UpdateProfile(ctx, accountID, bio, avatarURL)
 }
 
 func (as *AccountService) IsExist(ctx context.Context, accountID uint) (bool, error) {

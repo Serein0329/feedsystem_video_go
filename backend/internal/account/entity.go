@@ -27,6 +27,12 @@ type FindByUsernameRequest struct {
 	Username string `json:"username" binding:"required,max=20"`
 }
 
+type FindSimilarNameRequest struct {
+	Username string `json:"username" binding:"required,max=20"`
+	Limit    int    `json:"limit"`
+	LastID   uint   `json:"last_id"`
+}
+
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required,min=8,max=20"`
 	NewPassword string `json:"new_password" binding:"required,min=8,max=20"`
@@ -37,8 +43,9 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required,min=8,max=20"`
 }
 
-type UpdateBioRequest struct {
-	Bio string `json:"bio" binding:"required"`
+type UpdateProfileRequest struct {
+	Bio       string `json:"bio" binding:"max=255"`
+	AvatarURL string `json:"avatar_url" binding:"omitempty,url"`
 }
 
 type RefreshRequest struct {
@@ -58,6 +65,13 @@ type RenameResponse struct {
 	Token        string `json:"token"`
 	RefreshToken string `json:"refresh_token"`
 }
+
+type FindSimilarNameResponse struct {
+	Accounts []*Account `json:"accounts"`
+	HasMore  bool       `json:"has_more"`
+	LastID   uint       `json:"last_id"`
+}
+
 type GetProfileResponse struct {
 	Account
 	VideoCount    int64 `json:"video_count"`
