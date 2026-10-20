@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ const sessionTTL = 24 * time.Hour
 
 var errChunkCacheUnavailable = errors.New("chunk upload requires redis")
 var errChunkSessionNotFound = errors.New("session not found")
-var errChunkSessionDataInvaild = errors.New("session data invaild")
+var errChunkSessionDataInvalid = errors.New("session data invalid")
 
 type ChunkUploadHandler struct {
 	cache *rediscache.Client
@@ -58,7 +59,7 @@ func (h *ChunkUploadHandler) getSession(ctx context.Context, uploadID string) (*
 	}
 	var s ChunkUploadSession
 	if err := json.Unmarshal(b, &s); err != nil {
-		return nil, errChunkSessionDataInvaild
+		return nil, errChunkSessionDataInvalid
 	}
 	return &s, nil
 }
@@ -74,6 +75,35 @@ func (h *ChunkUploadHandler) setSession(ctx context.Context, s *ChunkUploadSessi
 	return h.cache.SetBytes(ctx, h.sessionKey(s.UploadID), b, sessionTTL)
 }
 
+func (h *ChunkUploadHandler) getLockWithRetry(ctx context.Context, uploadID string) (string, bool, error) {
+	lockKey := h.cache.Key("lock:chunk_upload:%s", uploadID)
+	var (
+		token   string
+		locked  bool
+		lockErr error
+	)
+	for range 5 {
+		token, locked, lockErr = h.cache.Lock(ctx, lockKey, 30*time.Second)
+		if lockErr != nil {
+			return "", false, lockErr
+		}
+		if locked {
+			return token, true, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", false, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return "", false, nil
+}
+
+func (h *ChunkUploadHandler) UnLock(ctx context.Context, uploadID string, token string) error {
+	lockKey := h.cache.Key("lock:chunk_upload:%s", uploadID)
+	return h.cache.Unlock(ctx, lockKey, token)
+}
+
 func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 	if h.cache == nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(errChunkCacheUnavailable))
@@ -82,7 +112,7 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 
 	var req InitChunkUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"err": err.Error()})
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	fileExt := strings.ToLower(filepath.Ext(req.Filename))
@@ -90,9 +120,22 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .mp4 allowed"})
 		return
 	}
-	const maxSize = 200 << 20
-	if req.FileSize > maxSize {
+	if req.FileSize > MaxFilesSize {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size exceeds 200MB limit"})
+		return
+	}
+	if req.ChunkSize <= 0 || req.ChunkSize > MaxChunkSize {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "invalid chunk_size"})
+		return
+	}
+	//向上取整
+	expectedChunks := int((req.FileSize + req.ChunkSize - 1) / req.ChunkSize)
+	if req.TotalChunks != expectedChunks || req.TotalChunks > MaxChunks {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "invalid total_chunks"})
+		return
+	}
+	if len(req.FileHash) > 64 {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "invalid file_hash"})
 		return
 	}
 
@@ -104,8 +147,13 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		session, sessErr := h.getSession(c.Request.Context(), string(existingID))
 		if sessErr == nil {
 			// Refresh TTL on resume
-			_ = h.cache.SetBytes(c.Request.Context(), hashKey, existingID, sessionTTL)
-			_ = h.setSession(c.Request.Context(), session)
+			if err := h.cache.SetBytes(c.Request.Context(), hashKey, existingID, sessionTTL); err != nil {
+				logger.Info("set cache failed", slog.String("key", hashKey), slog.String("err", err.Error()))
+			}
+			sessionKey := h.sessionKey(session.UploadID)
+			if err := h.cache.Expire(c.Request.Context(), sessionKey, sessionTTL); err != nil {
+				logger.Info("set cache expired failed", slog.String("key", sessionKey), slog.String("err", err.Error()))
+			}
 			response.Success(c, InitChunkUploadResponse{
 				UploadID:       session.UploadID,
 				UploadedChunks: session.UploadedChunks(),
@@ -125,7 +173,6 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		AccountID:    accountID,
 		Filename:     req.Filename,
 		FileSize:     req.FileSize,
-		ChunkSize:    req.ChunkSize,
 		TotalChunks:  req.TotalChunks,
 		FileHash:     req.FileHash,
 		UploadedBits: make([]bool, req.TotalChunks),
@@ -153,11 +200,29 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxChunkSize+1<<20)
+
 	var req UploadChunkRequest
 	if err := c.ShouldBind(&req); err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	token, locked, err := h.getLockWithRetry(c.Request.Context(), req.UploadID)
+	if err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		return
+	}
+	if !locked {
+		response.FailByErrCode(c, apierror.ErrTooManyRequest)
+		return
+	}
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = h.UnLock(ctx, req.UploadID, token)
+	}()
 
 	session, err := h.getSession(c.Request.Context(), req.UploadID)
 	if err != nil {
@@ -181,7 +246,6 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 	}
 
 	if session.UploadedBits[req.ChunkIndex] {
-		//todo
 		response.Success(c, gin.H{"chunk_index": req.ChunkIndex})
 		return
 	}
@@ -189,6 +253,10 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 	f, err := c.FormFile("file")
 	if err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
+		return
+	}
+	if f.Size > MaxChunkSize {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "chunk too large"})
 		return
 	}
 
@@ -292,6 +360,22 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 		return
 	}
 
+	token, locked, err := h.getLockWithRetry(c.Request.Context(), req.UploadID)
+	if err != nil {
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
+		return
+	}
+	if !locked {
+		response.FailByErrCode(c, apierror.ErrTooManyRequest)
+		return
+	}
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = h.UnLock(ctx, req.UploadID, token)
+	}()
+
 	session, err := h.getSession(c.Request.Context(), req.UploadID)
 	if err != nil {
 		if errors.Is(err, errChunkSessionNotFound) {
@@ -348,6 +432,7 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	defer func() { _ = finalFile.Close() }()
 
 	tmpDir := filepath.Join(".run", "uploads", "tmp", req.UploadID)
+	var totalSize int64
 	for i := 0; i < session.TotalChunks; i++ {
 		chunkPath := filepath.Join(tmpDir, fmt.Sprintf("%d", i))
 		cf, err := os.Open(chunkPath)
@@ -357,7 +442,8 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 			response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't open chunk: %v", err)))
 			return
 		}
-		_, err = io.Copy(finalFile, cf)
+		n, err := io.Copy(finalFile, cf)
+		totalSize += n
 		_ = cf.Close()
 		if err != nil {
 			_ = finalFile.Close()
@@ -366,8 +452,13 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 			return
 		}
 	}
+	if totalSize != session.FileSize {
+		_ = finalFile.Close()
+		_ = os.Remove(finalPath)
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size mismatch"})
+		return
+	}
 	_ = finalFile.Close()
-
 	// Clean up temp chunks
 	_ = os.RemoveAll(tmpDir)
 

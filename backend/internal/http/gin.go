@@ -53,6 +53,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	likeLimiter := mw.LimitHandler(cache, "video_like", 30, time.Minute, mw.KeyByAccount)
 	commentLimiter := mw.LimitHandler(cache, "video_comment", 10, time.Minute, mw.KeyByAccount)
 	socialLimiter := mw.LimitHandler(cache, "social_follow", 20, time.Minute, mw.KeyByAccount)
+	chunkLimiter := mw.LimitHandler(cache, "video_chunk", 120, time.Minute, mw.KeyByAccount)
 
 	// account
 	accountRepository := account.NewAccountRepository(db)
@@ -100,10 +101,10 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 		protectedVideoGroup.POST("/deleteVideo", videoHandler.DeleteVideo)
 		protectedVideoGroup.POST("/uploadCover", videoHandler.UploadCover)
 		protectedVideoGroup.POST("/publish", videoHandler.PublishVideo)
-		protectedVideoGroup.POST("/chunk/init", chunkHandler.InitChunkUpload)
-		protectedVideoGroup.POST("/chunk/upload", chunkHandler.UploadChunk)
-		protectedVideoGroup.POST("/chunk/status", chunkHandler.ChunkStatus)
-		protectedVideoGroup.POST("/chunk/complete", chunkHandler.CompleteChunkUpload)
+		protectedVideoGroup.POST("/chunk/init", chunkLimiter, chunkHandler.InitChunkUpload)
+		protectedVideoGroup.POST("/chunk/upload", chunkLimiter, chunkHandler.UploadChunk)
+		protectedVideoGroup.POST("/chunk/status", chunkLimiter, chunkHandler.ChunkStatus)
+		protectedVideoGroup.POST("/chunk/complete", chunkLimiter, chunkHandler.CompleteChunkUpload)
 	}
 
 	// like

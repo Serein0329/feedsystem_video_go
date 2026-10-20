@@ -1,13 +1,14 @@
 package video
 
-const ChunkSize = 5 << 20 // 5 MB
+const MaxChunkSize = 5 << 20
+const MaxFilesSize = 200 << 20
+const MaxChunks = 4096
 
 type ChunkUploadSession struct {
 	UploadID     string `json:"upload_id"`
 	AccountID    uint   `json:"account_id"`
 	Filename     string `json:"filename"`
 	FileSize     int64  `json:"file_size"`
-	ChunkSize    int64  `json:"chunk_size"`
 	TotalChunks  int    `json:"total_chunks"`
 	FileHash     string `json:"file_hash"`
 	UploadedBits []bool `json:"uploaded_bits"`
