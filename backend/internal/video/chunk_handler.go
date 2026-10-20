@@ -1,6 +1,7 @@
 package video
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/json"
 	"errors"
@@ -41,11 +42,11 @@ func (h *ChunkUploadHandler) hashKey(accountID uint, fileHash string) string {
 	return h.cache.Key("chunk_upload_hash:%d:%s", accountID, fileHash)
 }
 
-func (h *ChunkUploadHandler) getSession(ctx *gin.Context, uploadID string) (*ChunkUploadSession, error) {
+func (h *ChunkUploadHandler) getSession(ctx context.Context, uploadID string) (*ChunkUploadSession, error) {
 	if h.cache == nil {
 		return nil, errChunkCacheUnavailable
 	}
-	b, err := h.cache.GetBytes(ctx.Request.Context(), h.sessionKey(uploadID))
+	b, err := h.cache.GetBytes(ctx, h.sessionKey(uploadID))
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return nil, errChunkSessionNotFound
@@ -59,7 +60,7 @@ func (h *ChunkUploadHandler) getSession(ctx *gin.Context, uploadID string) (*Chu
 	return &s, nil
 }
 
-func (h *ChunkUploadHandler) setSession(ctx *gin.Context, s *ChunkUploadSession) error {
+func (h *ChunkUploadHandler) setSession(ctx context.Context, s *ChunkUploadSession) error {
 	if h.cache == nil {
 		return errChunkCacheUnavailable
 	}
@@ -67,7 +68,7 @@ func (h *ChunkUploadHandler) setSession(ctx *gin.Context, s *ChunkUploadSession)
 	if err != nil {
 		return err
 	}
-	return h.cache.SetBytes(ctx.Request.Context(), h.sessionKey(s.UploadID), b, sessionTTL)
+	return h.cache.SetBytes(ctx, h.sessionKey(s.UploadID), b, sessionTTL)
 }
 
 func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
@@ -81,17 +82,11 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"err": err.Error()})
 		return
 	}
-
-	accountID, _ := mw.GetAccountIDByGIN(c)
-
 	fileExt := strings.ToLower(filepath.Ext(req.Filename))
-	switch fileExt {
-	case ".mp4":
-	default:
+	if fileExt != ".mp4" {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .mp4 allowed"})
 		return
 	}
-
 	const maxSize = 200 << 20
 	if req.FileSize > maxSize {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size exceeds 200MB limit"})
@@ -99,17 +94,18 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 	}
 
 	// Check for existing session (resume)
+	accountID, _ := mw.GetAccountIDByGIN(c)
 	hashKey := h.hashKey(accountID, req.FileHash)
 	existingID, err := h.cache.GetBytes(c.Request.Context(), hashKey)
 	if err == nil && len(existingID) > 0 {
-		session, sessErr := h.getSession(c, string(existingID))
+		session, sessErr := h.getSession(c.Request.Context(), string(existingID))
 		if sessErr == nil {
 			// Refresh TTL on resume
 			_ = h.cache.SetBytes(c.Request.Context(), hashKey, existingID, sessionTTL)
-			_ = h.setSession(c, session)
-			response.Success(c, gin.H{
-				"upload_id":       session.UploadID,
-				"uploaded_chunks": session.UploadedChunks(),
+			_ = h.setSession(c.Request.Context(), session)
+			response.Success(c, InitChunkUploadResponse{
+				UploadID:       session.UploadID,
+				UploadedChunks: session.UploadedChunks(),
 			})
 			return
 		}
@@ -132,7 +128,7 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		UploadedBits: make([]bool, req.TotalChunks),
 	}
 
-	if err := h.setSession(c, session); err != nil {
+	if err := h.setSession(c.Request.Context(), session); err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
@@ -142,9 +138,9 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, gin.H{
-		"upload_id":       uploadID,
-		"uploaded_chunks": []int{},
+	response.Success(c, InitChunkUploadResponse{
+		UploadID:       uploadID,
+		UploadedChunks: []int{},
 	})
 }
 
@@ -160,7 +156,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 		return
 	}
 
-	session, err := h.getSession(c, req.UploadID)
+	session, err := h.getSession(c.Request.Context(), req.UploadID)
 	if err != nil {
 		if errors.Is(err, errChunkSessionNotFound) {
 			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
@@ -237,7 +233,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 	}
 
 	session.UploadedBits[req.ChunkIndex] = true
-	if err := h.setSession(c, session); err != nil {
+	if err := h.setSession(c.Request.Context(), session); err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't update session: %v", err)))
 		return
 	}
@@ -257,7 +253,7 @@ func (h *ChunkUploadHandler) ChunkStatus(c *gin.Context) {
 		return
 	}
 
-	session, err := h.getSession(c, req.UploadID)
+	session, err := h.getSession(c.Request.Context(), req.UploadID)
 	if err != nil {
 		if errors.Is(err, errChunkSessionNotFound) {
 			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
@@ -292,7 +288,7 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 		return
 	}
 
-	session, err := h.getSession(c, req.UploadID)
+	session, err := h.getSession(c.Request.Context(), req.UploadID)
 	if err != nil {
 		if errors.Is(err, errChunkSessionNotFound) {
 			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
