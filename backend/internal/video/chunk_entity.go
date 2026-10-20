@@ -58,3 +58,9 @@ type InitChunkUploadResponse struct {
 	UploadID       string `json:"upload_id"`
 	UploadedChunks []int  `json:"uploaded_chunks"`
 }
+
+type ChunkStatusResponse struct {
+	UploadID       string `json:"upload_id"`
+	UploadedChunks []int  `json:"uploaded_chunks"`
+	TotalChunks    int    `json:"total_chunks"`
+}

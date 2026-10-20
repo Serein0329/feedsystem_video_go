@@ -8,10 +8,12 @@ import (
 	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/mw"
 	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/pkg/randhex"
 	"feedsystem_video_go/internal/pkg/response"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +27,7 @@ const sessionTTL = 24 * time.Hour
 
 var errChunkCacheUnavailable = errors.New("chunk upload requires redis")
 var errChunkSessionNotFound = errors.New("session not found")
+var errChunkSessionDataInvaild = errors.New("session data invaild")
 
 type ChunkUploadHandler struct {
 	cache *rediscache.Client
@@ -55,7 +58,7 @@ func (h *ChunkUploadHandler) getSession(ctx context.Context, uploadID string) (*
 	}
 	var s ChunkUploadSession
 	if err := json.Unmarshal(b, &s); err != nil {
-		return nil, fmt.Errorf("invalid session data")
+		return nil, errChunkSessionDataInvaild
 	}
 	return &s, nil
 }
@@ -168,7 +171,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 
 	accountID, _ := mw.GetAccountIDByGIN(c)
 	if session.AccountID != accountID {
-		response.FailByErrCode(c, apierror.ErrUnauthorized)
+		response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "account no permission to control this session"})
 		return
 	}
 
@@ -178,6 +181,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 	}
 
 	if session.UploadedBits[req.ChunkIndex] {
+		//todo
 		response.Success(c, gin.H{"chunk_index": req.ChunkIndex})
 		return
 	}
@@ -193,7 +197,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't open chunk: %v", err)))
 		return
 	}
-	defer chunkFile.Close()
+	defer func() { _ = chunkFile.Close() }()
 
 	hash := md5.New()
 	if _, err := io.Copy(hash, chunkFile); err != nil {
@@ -225,7 +229,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create chunk file: %v", err)))
 		return
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, chunkFile); err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't save chunk: %v", err)))
@@ -258,21 +262,21 @@ func (h *ChunkUploadHandler) ChunkStatus(c *gin.Context) {
 		if errors.Is(err, errChunkSessionNotFound) {
 			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		} else {
-			response.FailWithDataByErrCode(c, apierror.ErrInternalServer, err)
+			response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		}
 		return
 	}
 
 	accountID, _ := mw.GetAccountIDByGIN(c)
 	if session.AccountID != accountID {
-		response.FailByErrCode(c, apierror.ErrUnauthorized)
+		response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "account no permission to control this session"})
 		return
 	}
 
-	response.Success(c, gin.H{
-		"upload_id":       session.UploadID,
-		"uploaded_chunks": session.UploadedChunks(),
-		"total_chunks":    session.TotalChunks,
+	response.Success(c, ChunkStatusResponse{
+		UploadID:       session.UploadID,
+		TotalChunks:    session.TotalChunks,
+		UploadedChunks: session.UploadedChunks(),
 	})
 }
 
@@ -293,14 +297,14 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 		if errors.Is(err, errChunkSessionNotFound) {
 			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		} else {
-			response.FailWithDataByErrCode(c, apierror.ErrInternalServer, err)
+			response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		}
 		return
 	}
 
 	accountID, _ := mw.GetAccountIDByGIN(c)
 	if session.AccountID != accountID {
-		response.FailByErrCode(c, apierror.ErrUnauthorized)
+		response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "account no permission to control this session"})
 		return
 	}
 
@@ -325,7 +329,7 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	root := filepath.Join(".run", "uploads")
 	absDir := filepath.Join(root, relDir)
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
-		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create  dir: %v", err)))
+		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create dir: %v", err)))
 		return
 	}
 
@@ -341,7 +345,7 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(fmt.Errorf("can't create final file: %v", err)))
 		return
 	}
-	defer finalFile.Close()
+	defer func() { _ = finalFile.Close() }()
 
 	tmpDir := filepath.Join(".run", "uploads", "tmp", req.UploadID)
 	for i := 0; i < session.TotalChunks; i++ {
@@ -368,11 +372,15 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	_ = os.RemoveAll(tmpDir)
 
 	// Clean up Redis session
-	_ = h.cache.Del(c.Request.Context(), h.sessionKey(req.UploadID))
-	_ = h.cache.Del(c.Request.Context(), h.hashKey(accountID, session.FileHash))
-
+	sessionKey := h.sessionKey(req.UploadID)
+	hashKey := h.hashKey(accountID, session.FileHash)
+	if err := h.cache.Del(c.Request.Context(), sessionKey); err != nil {
+		logger.Info("Del cache failed", slog.String("key", sessionKey), slog.Any("error", err))
+	}
+	if err := h.cache.Del(c.Request.Context(), hashKey); err != nil {
+		logger.Info("Del cache failed", slog.String("key", hashKey), slog.Any("error", err))
+	}
 	urlPath := fmt.Sprintf("/static/videos/%d/%s/%s.mp4", accountID, date, filename)
-	playURL := buildAbsoluteURL(c, urlPath)
 
-	response.Success(c, gin.H{"play_url": playURL})
+	response.Success(c, gin.H{"play_url": buildAbsoluteURL(c, urlPath)})
 }
