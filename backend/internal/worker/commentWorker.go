@@ -16,16 +16,15 @@ import (
 type CommentWorker struct {
 	ch       *amqp.Channel
 	comments *video.CommentRepository
-	videos   *video.VideoRepository
 	queue    string
 }
 
-func NewCommentWorker(ch *amqp.Channel, comments *video.CommentRepository, videos *video.VideoRepository, queue string) *CommentWorker {
-	return &CommentWorker{ch: ch, comments: comments, videos: videos, queue: queue}
+func NewCommentWorker(ch *amqp.Channel, comments *video.CommentRepository, queue string) *CommentWorker {
+	return &CommentWorker{ch: ch, comments: comments, queue: queue}
 }
 
 func (w *CommentWorker) Run(ctx context.Context) error {
-	if w == nil || w.ch == nil || w.comments == nil || w.videos == nil {
+	if w == nil || w.ch == nil || w.comments == nil {
 		return errors.New("comment worker is not initialized")
 	}
 	if w.queue == "" {

@@ -251,7 +251,6 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	notifGroup.POST("/unreadCount", sseHub.UnreadCountHandler)
 
 	//Worker
-	worker.StartTimelineConsumer(rabbitmq2.TimelineQueue, cache, rmq)
 	go func() {
 		if rmq != nil {
 			if err := rabbitmq2.NewNotificationMQ(rmq); err != nil {
@@ -264,14 +263,17 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 			log.Printf("Notification SSE disabled")
 		}
 	}()
+	go runWorkerWithRetry("TimelineWorker", rmq, func(ch *amqp.Channel) error {
+		return worker.NewTimelineWorker(ch, cache, rabbitmq2.TimelineQueue).Run(context.Background())
+	})
 	go runWorkerWithRetry("SocialWorker", rmq, func(ch *amqp.Channel) error {
-		return worker.NewSocialWorker(ch, socialRepository, "social.events").Run(context.Background())
+		return worker.NewSocialWorker(ch, socialRepository, rabbitmq2.SocialQueue).Run(context.Background())
 	})
 	go runWorkerWithRetry("LikeWorker", rmq, func(ch *amqp.Channel) error {
-		return worker.NewLikeWorker(ch, likeRepository, videoRepository, "like.events").Run(context.Background())
+		return worker.NewLikeWorker(ch, likeRepository, videoRepository, rabbitmq2.LikeQueue).Run(context.Background())
 	})
 	go runWorkerWithRetry("CommentWorker", rmq, func(ch *amqp.Channel) error {
-		return worker.NewCommentWorker(ch, commentRepository, videoRepository, "comment.events").Run(context.Background())
+		return worker.NewCommentWorker(ch, commentRepository, rabbitmq2.CommentQueue).Run(context.Background())
 	})
 	if cache != nil {
 		go runWorkerWithRetry("PopularityWorker", rmq, func(ch *amqp.Channel) error {
@@ -283,25 +285,25 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 
 func runWorkerWithRetry(name string, rmq *rabbitmq2.RabbitMQ, fn func(*amqp.Channel) error) {
 	if rmq == nil {
+		logger.Info("Worker disable for rabbitmq is not initialized", slog.String("name", name))
 		return
 	}
 	for {
 		ch, err := rmq.Conn.Channel()
 		if err != nil {
-			log.Printf("%s: 创建 Channel 失败: %v, 5秒后重试", name, err)
+			logger.Info("Worker 创建Channel 失败,5秒后重试", slog.String("name", name), slog.Any("error", err))
 			time.Sleep(5 * time.Second)
 			continue
 		}
 		if err := ch.Qos(50, 0, false); err != nil {
-			log.Printf("%s: QoS 设置失败: %v, 5秒后重试", name, err)
+			logger.Info("Worker QoS设置失败, 5秒后重试", slog.String("name", name), slog.Any("error", err))
 			_ = ch.Close()
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
-		log.Printf("%s started, consuming", name)
 		if err := fn(ch); err != nil {
-			log.Printf("%s: %v, 5秒后重连...", name, err)
+			logger.Info("Worker 消费Queue失败, 5秒后重连", slog.String("name", name), slog.Any("error", err))
 		}
 		_ = ch.Close()
 		time.Sleep(5 * time.Second)
