@@ -1,7 +1,6 @@
 package video
 
 import (
-	"feedsystem_video_go/internal/account"
 	"feedsystem_video_go/internal/mw"
 	"feedsystem_video_go/internal/pkg/apierror"
 	"feedsystem_video_go/internal/pkg/randhex"
@@ -17,12 +16,11 @@ import (
 )
 
 type VideoHandler struct {
-	service        *VideoService
-	accountService *account.AccountService
+	service *VideoService
 }
 
-func NewVideoHandler(service *VideoService, accountService *account.AccountService) *VideoHandler {
-	return &VideoHandler{service: service, accountService: accountService}
+func NewVideoHandler(service *VideoService) *VideoHandler {
+	return &VideoHandler{service: service}
 }
 
 func (vh *VideoHandler) PublishVideo(c *gin.Context) {
@@ -31,12 +29,15 @@ func (vh *VideoHandler) PublishVideo(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	req.PlayURL = strings.TrimSpace(req.PlayURL)
+	req.CoverURL = strings.TrimSpace(req.CoverURL)
 	req.Title = strings.TrimSpace(req.Title)
 	if len(req.Title) == 0 {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "标题不为空"})
+		return
 	}
-	req.PlayURL = strings.TrimSpace(req.PlayURL)
-	req.CoverURL = strings.TrimSpace(req.CoverURL)
+
 	authorId, _ := mw.GetAccountIDByGIN(c)
 	username, _ := mw.GetUsernameByGIN(c)
 	video := &Video{
@@ -169,9 +170,9 @@ func (vh *VideoHandler) SearchVideos(c *gin.Context) {
 		return
 	}
 	if res.Videos == nil {
-		res.Videos = []*Video{}
+		res.Videos = []Video{}
 	}
-	response.Success(c, res)
+	response.SuccessWithPage(c, res.Videos, res.HasMore, res.LastID)
 }
 
 func (vh *VideoHandler) DeleteVideo(c *gin.Context) {
@@ -194,33 +195,28 @@ func (vh *VideoHandler) ListByAuthorID(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	isExist, err := vh.accountService.IsExist(c.Request.Context(), req.AuthorID)
-	if err != nil {
-		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
-		return
+
+	if req.Limit <= 0 || req.Limit > 50 {
+		req.Limit = 20
 	}
-	if !isExist {
-		response.FailByErrCode(c, apierror.ErrUserNotFound)
-		return
-	}
-	videos, err := vh.service.ListByAuthorID(c.Request.Context(), req.AuthorID)
+	res, err := vh.service.ListByAuthorID(c.Request.Context(), req.AuthorID, req.LastID, req.Limit)
 	if err != nil {
 		response.FailByErr(c, err)
 		return
 	}
-	if videos == nil {
-		videos = []Video{}
+	if res.Videos == nil {
+		res.Videos = []Video{}
 	}
-	response.Success(c, videos)
+	response.SuccessWithPage(c, res.Videos, res.HasMore, res.LastID)
 }
 
-func (vh *VideoHandler) GetDetail(c *gin.Context) {
-	var req GetDetailRequest
+func (vh *VideoHandler) GetByID(c *gin.Context) {
+	var req GetByIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, err.Error())
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	video, err := vh.service.GetDetail(c.Request.Context(), req.ID)
+	video, err := vh.service.GetByID(c.Request.Context(), req.ID)
 	if err != nil {
 		response.FailByErr(c, err)
 		return

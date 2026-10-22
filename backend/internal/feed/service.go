@@ -323,7 +323,7 @@ func (f *FeedService) ListByPopularity(ctx context.Context, limit int, reqAsOf i
 		const win = 60
 		keys := make([]string, 0, win)
 		for i := range win {
-			keys = append(keys, f.rediscache.Key("hot:video:1m:%s", asOf.Add(-time.Duration(i)*time.Minute).Format("200601021504")))
+			keys = append(keys, f.rediscache.Key("video:hot:%s", asOf.Add(-time.Duration(i)*time.Minute).Format("200601021504")))
 		}
 
 		opCtx, cancel := context.WithTimeout(ctx, 80*time.Millisecond)

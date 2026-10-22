@@ -18,12 +18,16 @@ type UnfollowRequest struct {
 	VloggerID uint `json:"vlogger_id" binding:"required"`
 }
 
-type GetAllFollowersRequest struct {
+type IsfollowedRequest struct {
 	VloggerID uint `json:"vlogger_id" binding:"required"`
 }
 
+type GetAllFollowersRequest struct {
+	VloggerID uint `json:"vlogger_id"`
+}
+
 type GetAllVloggersRequest struct {
-	FollowerID uint `json:"follower_id" binding:"required"`
+	FollowerID uint `json:"follower_id"`
 }
 
 type GetAllFollowersResponse struct {
@@ -36,7 +40,7 @@ type GetAllVloggersResponse struct {
 	VloggerCount int64              `json:"vlogger_count"`
 }
 
-type SocialCounts struct {
+type GetCountsResponse struct {
 	FollowerCount int64 `json:"follower_count"`
 	VloggerCount  int64 `json:"vlogger_count"`
 }

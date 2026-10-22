@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"feedsystem_video_go/internal/account"
 	"feedsystem_video_go/internal/db/rabbitmq"
 	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/pkg/apierror"
@@ -17,14 +18,15 @@ import (
 )
 
 type VideoService struct {
-	repo       *VideoRepository
-	cache      *rediscache.Client
-	cacheTTL   time.Duration
-	timelineMQ *rabbitmq.TimelineMQ
+	videoRepo   *VideoRepository
+	accountRepo *account.AccountRepository
+	cache       *rediscache.Client
+	cacheTTL    time.Duration
+	timelineMQ  *rabbitmq.TimelineMQ
 }
 
-func NewVideoService(repo *VideoRepository, cache *rediscache.Client, popularityMQ *rabbitmq.TimelineMQ) *VideoService {
-	return &VideoService{repo: repo, cache: cache, cacheTTL: 5 * time.Minute, timelineMQ: popularityMQ}
+func NewVideoService(repo *VideoRepository, accounRepo *account.AccountRepository, cache *rediscache.Client, popularityMQ *rabbitmq.TimelineMQ) *VideoService {
+	return &VideoService{videoRepo: repo, accountRepo: accounRepo, cache: cache, cacheTTL: 5 * time.Minute, timelineMQ: popularityMQ}
 }
 
 func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
@@ -33,7 +35,7 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 	video.CoverURL = strings.TrimSpace(video.CoverURL)
 
 	tags := ExtractTags(video.Description)
-	if err := vs.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := vs.videoRepo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(video).Error; err != nil {
 			return err
 		}
@@ -51,7 +53,7 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 		return err
 	}
 	if err := vs.timelineMQ.PublishVideo(ctx, video.ID, video.CreateTime); err != nil {
-		logger.Info("publish msg failed",
+		logger.Info("publish mq failed",
 			slog.String("excahnge", rabbitmq.TimelineExchange),
 			slog.String("bindingkey", rabbitmq.TimelineBindingKey),
 			slog.Any("error", err))
@@ -60,7 +62,7 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 }
 
 func (vs *VideoService) SearchVideos(ctx context.Context, keyword string, lastID uint, limit int) (SearchVideosResponse, error) {
-	videos, err := vs.repo.SearchByKeyword(ctx, keyword, lastID, limit)
+	videos, err := vs.videoRepo.SearchByKeyword(ctx, keyword, lastID, limit)
 	if err != nil {
 		return SearchVideosResponse{}, err
 	}
@@ -76,14 +78,14 @@ func (vs *VideoService) SearchVideos(ctx context.Context, keyword string, lastID
 }
 
 func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) error {
-	video, err := vs.repo.GetByID(ctx, id)
+	video, err := vs.videoRepo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
 	if video.AuthorID != authorID {
 		return apierror.ErrForbidden
 	}
-	if err := vs.repo.DeleteVideo(ctx, id); err != nil {
+	if err := vs.videoRepo.DeleteVideo(ctx, id); err != nil {
 		return err
 	}
 	if vs.cache != nil {
@@ -97,15 +99,30 @@ func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) erro
 	return nil
 }
 
-func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID uint) ([]Video, error) {
-	videos, err := vs.repo.ListByAuthorID(ctx, authorID)
+func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID, lastID uint, limit int) (ListByAuthorIDResponse, error) {
+	exist, err := vs.accountRepo.IsExist(ctx, authorID)
 	if err != nil {
-		return nil, err
+		return ListByAuthorIDResponse{}, err
 	}
-	return videos, nil
+	if !exist {
+		return ListByAuthorIDResponse{}, apierror.ErrUserNotFound
+	}
+
+	videos, err := vs.videoRepo.ListByAuthorID(ctx, authorID, lastID, limit)
+	if err != nil {
+		return ListByAuthorIDResponse{}, err
+	}
+	if len(videos) == 0 {
+		return ListByAuthorIDResponse{LastID: lastID}, nil
+	}
+	return ListByAuthorIDResponse{
+		Videos:  videos,
+		HasMore: len(videos) == limit,
+		LastID:  videos[len(videos)-1].ID,
+	}, nil
 }
 
-func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) {
+func (vs *VideoService) GetByID(ctx context.Context, id uint) (*Video, error) {
 	cacheKey := vs.cache.Key("video:entity:%d", id)
 
 	getCached := func() (*Video, error) {
@@ -151,7 +168,7 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 					return v, nil
 				}
 
-				video, err := vs.repo.GetByID(ctx, id)
+				video, err := vs.videoRepo.GetByID(ctx, id)
 				if err != nil {
 					return nil, err
 				}
@@ -173,7 +190,7 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 		}
 	}
 
-	video, err := vs.repo.GetByID(ctx, id)
+	video, err := vs.videoRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}

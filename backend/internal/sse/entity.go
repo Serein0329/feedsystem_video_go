@@ -6,6 +6,7 @@ type Notification struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	RecipientID uint      `gorm:"index;not null" json:"recipient_id"`
 	SenderID    uint      `gorm:"not null" json:"sender_id"`
+	Username    string    `gorm:"not null" json:"username"`
 	Type        string    `gorm:"type:varchar(50);not null" json:"type"`
 	TargetID    uint      `json:"target_id"`
 	Content     string    `gorm:"type:varchar(255)" json:"content"`

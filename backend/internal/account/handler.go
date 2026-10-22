@@ -126,9 +126,9 @@ func (h *AccountHandler) FindSimilarName(c *gin.Context) {
 		return
 	}
 	if len(res.Accounts) == 0 {
-		res.Accounts = []*Account{}
+		res.Accounts = []Account{}
 	}
-	response.Success(c, res)
+	response.SuccessWithPage(c, res.Accounts, res.HasMore, res.LastID)
 }
 
 func (h *AccountHandler) Login(c *gin.Context) {

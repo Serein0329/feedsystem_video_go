@@ -28,9 +28,11 @@ type DeleteVideoRequest struct {
 
 type ListByAuthorIDRequest struct {
 	AuthorID uint `json:"author_id" binding:"required"`
+	LastID   uint `json:"last_id" binding:"required"`
+	Limit    int  `json:"limit" binding:"required"`
 }
 
-type GetDetailRequest struct {
+type GetByIDRequest struct {
 	ID uint `json:"id" binding:"required"`
 }
 
@@ -46,7 +48,13 @@ type UpdateLikesCountRequest struct {
 }
 
 type SearchVideosResponse struct {
-	Videos  []*Video `json:"videos"`
-	HasMore bool     `json:"has_more"`
-	LastID  uint     `json:"last_id"`
+	Videos  []Video `json:"videos"`
+	HasMore bool    `json:"has_more"`
+	LastID  uint    `json:"last_id"`
+}
+
+type ListByAuthorIDResponse struct {
+	Videos  []Video `json:"videos"`
+	HasMore bool    `json:"has_more"`
+	LastID  uint    `json:"last_id"`
 }

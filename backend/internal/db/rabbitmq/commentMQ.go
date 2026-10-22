@@ -59,9 +59,10 @@ func (c *CommentMQ) Publish(ctx context.Context, username string, videoID, autho
 	})
 }
 
-func (c *CommentMQ) Delete(ctx context.Context, commentID uint) error {
+func (c *CommentMQ) Delete(ctx context.Context, commentID, videoID uint) error {
 	return c.publish(ctx, "delete", CommentDeleteRK, CommentEvent{
 		CommentID: commentID,
+		VideoID:   videoID,
 	})
 }
 

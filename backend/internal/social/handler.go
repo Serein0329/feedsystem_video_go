@@ -23,13 +23,10 @@ func (h *SocialHandler) Follow(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	FollowerID, _ := mw.GetAccountIDByGIN(c)
 
-	social := &Social{
-		FollowerID: FollowerID,
-		VloggerID:  req.VloggerID,
-	}
-	if err := h.service.Follow(c.Request.Context(), social); err != nil {
+	FollowerID, _ := mw.GetAccountIDByGIN(c)
+	username, _ := mw.GetUsernameByGIN(c)
+	if err := h.service.Follow(c.Request.Context(), FollowerID, req.VloggerID, username); err != nil {
 		response.FailByErr(c, err)
 		return
 	}
@@ -43,15 +40,26 @@ func (h *SocialHandler) Unfollow(c *gin.Context) {
 		return
 	}
 	FollowerID, _ := mw.GetAccountIDByGIN(c)
-	social := &Social{
-		FollowerID: FollowerID,
-		VloggerID:  req.VloggerID,
-	}
-	if err := h.service.Unfollow(c.Request.Context(), social); err != nil {
+	if err := h.service.Unfollow(c.Request.Context(), FollowerID, req.VloggerID); err != nil {
 		response.FailByErr(c, err)
 		return
 	}
 	response.Success(c, nil)
+}
+
+func (h *SocialHandler) Isfollowed(c *gin.Context) {
+	var req IsfollowedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	FollowerID, _ := mw.GetAccountIDByGIN(c)
+	if isfollowed, err := h.service.Isfollowed(c.Request.Context(), FollowerID, req.VloggerID); err != nil {
+		response.FailByErr(c, err)
+		return
+	} else {
+		response.Success(c, gin.H{"isFollowed": isfollowed})
+	}
 }
 
 func (h *SocialHandler) GetAllFollowers(c *gin.Context) {
@@ -61,11 +69,10 @@ func (h *SocialHandler) GetAllFollowers(c *gin.Context) {
 		return
 	}
 
-	vloggerID := req.VloggerID
-	if vloggerID == 0 {
-		vloggerID, _ = mw.GetAccountIDByGIN(c)
+	if req.VloggerID == 0 {
+		req.VloggerID, _ = mw.GetAccountIDByGIN(c)
 	}
-	followers, err := h.service.GetAllFollowers(c.Request.Context(), vloggerID)
+	followers, err := h.service.GetAllFollowers(c.Request.Context(), req.VloggerID)
 	if err != nil {
 		response.FailByErr(c, err)
 		return
@@ -73,7 +80,7 @@ func (h *SocialHandler) GetAllFollowers(c *gin.Context) {
 	if followers == nil {
 		followers = []*account.Account{}
 	}
-	followerCount, _ := h.service.CountFollowers(c.Request.Context(), vloggerID)
+	followerCount, _ := h.service.CountFollowers(c.Request.Context(), req.VloggerID)
 	response.Success(c, GetAllFollowersResponse{Followers: followers, FollowerCount: followerCount})
 }
 
@@ -84,12 +91,11 @@ func (h *SocialHandler) GetAllVloggers(c *gin.Context) {
 		return
 	}
 
-	followerID := req.FollowerID
-	if followerID == 0 {
-		followerID, _ = mw.GetAccountIDByGIN(c)
+	if req.FollowerID == 0 {
+		req.FollowerID, _ = mw.GetAccountIDByGIN(c)
 	}
 
-	vloggers, err := h.service.GetAllVloggers(c.Request.Context(), followerID)
+	vloggers, err := h.service.GetAllVloggers(c.Request.Context(), req.FollowerID)
 	if err != nil {
 		response.FailByErr(c, err)
 		return
@@ -97,7 +103,7 @@ func (h *SocialHandler) GetAllVloggers(c *gin.Context) {
 	if vloggers == nil {
 		vloggers = []*account.Account{}
 	}
-	vloggerCount, _ := h.service.CountVloggers(c.Request.Context(), followerID)
+	vloggerCount, _ := h.service.CountVloggers(c.Request.Context(), req.FollowerID)
 	response.Success(c, GetAllVloggersResponse{Vloggers: vloggers, VloggerCount: vloggerCount})
 }
 
@@ -105,5 +111,5 @@ func (h *SocialHandler) GetCounts(c *gin.Context) {
 	accountID, _ := mw.GetAccountIDByGIN(c)
 	followerCount, _ := h.service.CountFollowers(c.Request.Context(), accountID)
 	vloggerCount, _ := h.service.CountVloggers(c.Request.Context(), accountID)
-	response.Success(c, SocialCounts{FollowerCount: followerCount, VloggerCount: vloggerCount})
+	response.Success(c, GetCountsResponse{FollowerCount: followerCount, VloggerCount: vloggerCount})
 }

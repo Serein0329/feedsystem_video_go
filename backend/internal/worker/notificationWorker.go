@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"feedsystem_video_go/internal/account"
 	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
 	"feedsystem_video_go/internal/sse"
 	"feedsystem_video_go/internal/video"
@@ -118,20 +117,20 @@ func (w *NotificationWorker) process(ctx context.Context, d amqp.Delivery) error
 			return nil
 		}
 		var authorID uint
-		if err := w.db.WithContext(ctx).Model(&struct {
-			ID       uint
-			AuthorID uint
-		}{}).Table("videos").Where("id = ?", evt.VideoID).Select("author_id").Scan(&authorID).Error; err != nil {
+		if err := w.db.WithContext(ctx).Model(&video.Video{}).Where("id = ?", evt.VideoID).Select("author_id").Scan(&authorID).Error; err != nil {
 			return err
 		}
 		if authorID == 0 || authorID == evt.UserID {
 			return nil
 		}
-		var userName string
-		if err := w.db.WithContext(ctx).Model(&account.Account{}).Select("username").Where("id = ?", evt.UserID).Scan(&userName).Error; err != nil {
-			return err
-		}
-		notifs = append(notifs, &Notification{RecipientID: authorID, SenderID: evt.UserID, Type: "like", TargetID: evt.VideoID, Content: userName + "点赞了你的视频"})
+		notifs = append(notifs, &Notification{
+			RecipientID: authorID,
+			SenderID:    evt.UserID,
+			Type:        "like",
+			TargetID:    evt.VideoID,
+			Username:    evt.Username,
+			Content:     "点赞了你的视频",
+		})
 	case routingKey == "comment.publish":
 		var evt rabbitmq2.CommentEvent
 		if err := json.Unmarshal(body, &evt); err != nil {
@@ -147,7 +146,14 @@ func (w *NotificationWorker) process(ctx context.Context, d amqp.Delivery) error
 		if authorID == 0 || authorID == evt.AuthorID {
 			return nil
 		}
-		notifs = append(notifs, &Notification{RecipientID: authorID, SenderID: evt.AuthorID, Type: "comment", TargetID: evt.VideoID, Content: evt.Username + "评论了你的视频"})
+		notifs = append(notifs, &Notification{
+			RecipientID: authorID,
+			SenderID:    evt.AuthorID,
+			Type:        "comment",
+			TargetID:    evt.VideoID,
+			Username:    evt.Username,
+			Content:     "评论了你的视频",
+		})
 	case routingKey == "comment.mention":
 		var evt rabbitmq2.CommentEvent
 		if err := json.Unmarshal(body, &evt); err != nil {
@@ -165,7 +171,8 @@ func (w *NotificationWorker) process(ctx context.Context, d amqp.Delivery) error
 				SenderID:    evt.AuthorID,
 				Type:        "mention",
 				TargetID:    evt.VideoID,
-				Content:     evt.Username + " 在评论中提到了你",
+				Username:    evt.Username,
+				Content:     "在评论中提到了你",
 			})
 		}
 	case routingKey == "social.follow":
@@ -176,11 +183,14 @@ func (w *NotificationWorker) process(ctx context.Context, d amqp.Delivery) error
 		if evt.FollowerID == 0 || evt.VloggerID == 0 {
 			return nil
 		}
-		var userName string
-		if err := w.db.WithContext(ctx).Model(&account.Account{}).Select("username").Where("id = ?", evt.FollowerID).Scan(&userName).Error; err != nil {
-			return err
-		}
-		notifs = append(notifs, &Notification{RecipientID: evt.VloggerID, SenderID: evt.FollowerID, Type: "follow", TargetID: evt.FollowerID, Content: userName + "关注了你"})
+		notifs = append(notifs, &Notification{
+			RecipientID: evt.VloggerID,
+			SenderID:    evt.FollowerID,
+			Type:        "follow",
+			TargetID:    evt.FollowerID,
+			Username:    evt.Username,
+			Content:     "关注了你",
+		})
 	}
 
 	if notifs == nil || len(notifs) == 0 {

@@ -93,20 +93,13 @@ func (w *SocialWorker) process(ctx context.Context, body []byte) error {
 
 	switch evt.Action {
 	case "follow":
-		err := w.repo.Follow(ctx, &social.Social{
-			FollowerID: evt.FollowerID,
-			VloggerID:  evt.VloggerID,
-		})
+		err := w.repo.Follow(ctx, evt.FollowerID, evt.VloggerID)
 		if err == nil {
 			return nil
 		}
 		return err
 	case "unfollow":
-		return w.repo.Unfollow(ctx, &social.Social{
-			FollowerID: evt.FollowerID,
-			VloggerID:  evt.VloggerID,
-		})
-	default:
-		return nil
+		return w.repo.Unfollow(ctx, evt.FollowerID, evt.VloggerID)
 	}
+	return nil
 }

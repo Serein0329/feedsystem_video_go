@@ -16,9 +16,12 @@ func NewSocialRepository(db *gorm.DB) *SocialRepository {
 	return &SocialRepository{db: db}
 }
 
-func (r *SocialRepository) Follow(ctx context.Context, social *Social) error {
-	if err := r.db.WithContext(ctx).Create(social).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+func (r *SocialRepository) Follow(ctx context.Context, followerID, vloggerID uint) error {
+	if err := r.db.WithContext(ctx).Create(&Social{
+		FollowerID: followerID,
+		VloggerID:  vloggerID,
+	}).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			return nil
 		}
 		return err
@@ -26,10 +29,21 @@ func (r *SocialRepository) Follow(ctx context.Context, social *Social) error {
 	return nil
 }
 
-func (r *SocialRepository) Unfollow(ctx context.Context, social *Social) error {
+func (r *SocialRepository) Unfollow(ctx context.Context, followerID, vloggerID uint) error {
 	return r.db.WithContext(ctx).
-		Where("follower_id = ? AND vlogger_id = ?", social.FollowerID, social.VloggerID).
+		Where("follower_id = ? AND vlogger_id = ?", followerID, vloggerID).
 		Delete(&Social{}).Error
+}
+
+func (r *SocialRepository) IsFollowed(ctx context.Context, followerID, vloggerID uint) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&Social{}).
+		Where("follower_id = ? AND vlogger_id = ?", followerID, vloggerID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (r *SocialRepository) GetAllFollowers(ctx context.Context, VloggerID uint) ([]*account.Account, error) {
@@ -58,17 +72,6 @@ func (r *SocialRepository) GetAllVloggers(ctx context.Context, FollowerID uint) 
 		return nil, err
 	}
 	return vloggers, nil
-}
-
-func (r *SocialRepository) IsFollowed(ctx context.Context, social *Social) (bool, error) {
-	var count int64
-	if err := r.db.WithContext(ctx).
-		Model(&Social{}).
-		Where("follower_id = ? AND vlogger_id = ?", social.FollowerID, social.VloggerID).
-		Count(&count).Error; err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (r *SocialRepository) CountFollowers(ctx context.Context, vloggerID uint) (int64, error) {

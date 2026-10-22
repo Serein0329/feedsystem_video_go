@@ -173,6 +173,7 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		AccountID:    accountID,
 		Filename:     req.Filename,
 		FileSize:     req.FileSize,
+		ChunkSize:    req.ChunkSize,
 		TotalChunks:  req.TotalChunks,
 		FileHash:     req.FileHash,
 		UploadedBits: make([]bool, req.TotalChunks),
@@ -255,7 +256,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
 		return
 	}
-	if f.Size > MaxChunkSize {
+	if f.Size > session.ChunkSize {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "chunk too large"})
 		return
 	}
@@ -455,6 +456,7 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	if totalSize != session.FileSize {
 		_ = finalFile.Close()
 		_ = os.Remove(finalPath)
+		_ = os.RemoveAll(tmpDir)
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size mismatch"})
 		return
 	}

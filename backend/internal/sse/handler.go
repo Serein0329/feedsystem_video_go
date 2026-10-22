@@ -89,8 +89,11 @@ func (h *SSEHub) SSEHandler(c *gin.Context) {
 				return
 			}
 			b, err := json.Marshal(n)
-			if err == nil {
-				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(c.Writer, "event: notification\ndata: %s\n\n", b); err != nil {
+				return
 			}
 			if flusher != nil {
 				flusher.Flush()

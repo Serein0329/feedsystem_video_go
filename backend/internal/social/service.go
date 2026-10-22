@@ -6,7 +6,8 @@ import (
 	"feedsystem_video_go/internal/db/rabbitmq"
 	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/pkg/apierror"
-	"log"
+	"feedsystem_video_go/internal/pkg/logger"
+	"log/slog"
 )
 
 type SocialService struct {
@@ -20,11 +21,11 @@ func NewSocialService(repo *SocialRepository, accountrepo *account.AccountReposi
 	return &SocialService{repo: repo, accountrepo: accountrepo, socialMQ: socialMQ, cache: cache}
 }
 
-func (s *SocialService) Follow(ctx context.Context, social *Social) error {
-	if social.VloggerID == social.FollowerID {
+func (s *SocialService) Follow(ctx context.Context, followerID, vloggerID uint, username string) error {
+	if followerID == vloggerID {
 		return apierror.ErrSocialNotFollowSelf
 	}
-	isExist, err := s.accountrepo.IsExist(ctx, social.VloggerID)
+	isExist, err := s.accountrepo.IsExist(ctx, vloggerID)
 	if err != nil {
 		return err
 	}
@@ -32,58 +33,47 @@ func (s *SocialService) Follow(ctx context.Context, social *Social) error {
 		return apierror.ErrUserNotFound
 	}
 
-	if err := s.repo.Follow(ctx, social); err != nil {
-		return err
-	}
-
-	s.invalidateFollowingFeedCache(ctx, social.FollowerID)
-
-	// 最后发 MQ（用于通知），失败只记日志不影响业务
+	mysqlEnqueued := false
 	if s.socialMQ != nil {
-		if err := s.socialMQ.Follow(ctx, social.FollowerID, social.VloggerID); err != nil {
-			log.Printf("social MQ Follow 发布失败: %v", err)
+		if err := s.socialMQ.Follow(ctx, followerID, vloggerID, username); err == nil {
+			mysqlEnqueued = true
 		}
 	}
+	if !mysqlEnqueued {
+		if err := s.repo.Follow(ctx, followerID, vloggerID); err != nil {
+			return err
+		}
+	}
+	s.invalidateFollowingFeedCache(ctx, followerID)
 	return nil
 }
 
-func (s *SocialService) Unfollow(ctx context.Context, social *Social) error {
-	isExist, err := s.accountrepo.IsExist(ctx, social.VloggerID)
+func (s *SocialService) Unfollow(ctx context.Context, followerID, vloggerID uint) error {
+	isExist, err := s.accountrepo.IsExist(ctx, vloggerID)
 	if err != nil {
 		return err
 	}
 	if !isExist {
 		return apierror.ErrUserNotFound
 	}
-	isFollowed, err := s.repo.IsFollowed(ctx, social)
-	if err != nil {
+
+	if err := s.repo.Unfollow(ctx, followerID, vloggerID); err != nil {
 		return err
 	}
-	if !isFollowed {
-		return nil
-	}
-
-	if err := s.repo.Unfollow(ctx, social); err != nil {
-		return err
-	}
-
-	s.invalidateFollowingFeedCache(ctx, social.FollowerID)
-
-	if s.socialMQ != nil {
-		if err := s.socialMQ.UnFollow(ctx, social.FollowerID, social.VloggerID); err != nil {
-			log.Printf("social MQ UnFollow 发布失败: %v", err)
-		}
-	}
+	s.invalidateFollowingFeedCache(ctx, followerID)
 	return nil
 }
 
+func (s *SocialService) Isfollowed(ctx context.Context, followerID, vloggerID uint) (bool, error) {
+	return s.repo.IsFollowed(ctx, followerID, vloggerID)
+}
 func (s *SocialService) invalidateFollowingFeedCache(ctx context.Context, accountID uint) {
 	if s.cache == nil {
 		return
 	}
 	pattern := s.cache.Key("feed:listByFollowing:*:accountID=%d:*", accountID)
 	if err := s.cache.DelByPattern(ctx, pattern); err != nil {
-		log.Printf("失效 Following 缓存失败: accountID=%d, err=%v", accountID, err)
+		logger.Info("Del cache failed", slog.String("key", pattern), slog.Any("error", err))
 	}
 }
 

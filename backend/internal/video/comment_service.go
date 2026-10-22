@@ -6,12 +6,10 @@ import (
 	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
 	rediscache "feedsystem_video_go/internal/db/redis"
 	"feedsystem_video_go/internal/pkg/apierror"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/sse"
-	"log"
+	"log/slog"
 	"regexp"
-	"strings"
-
-	"gorm.io/gorm"
 )
 
 type CommentService struct {
@@ -27,8 +25,6 @@ func NewCommentService(repo *CommentRepository, videoRepo *VideoRepository, cach
 }
 
 func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
-	comment.Content = strings.TrimSpace(comment.Content)
-
 	exists, err := s.VideoRepository.IsExist(ctx, comment.VideoID)
 	if err != nil {
 		return err
@@ -38,37 +34,27 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 	}
 
 	mysqlEnqueued := false
-	redisEnqueued := false
 	if s.commentMQ != nil {
 		if err := s.commentMQ.Publish(ctx, comment.Username, comment.VideoID, comment.AuthorID, comment.Content); err == nil {
 			mysqlEnqueued = true
 		}
 	}
+	if !mysqlEnqueued {
+		if err := s.repo.CreateComment(ctx, comment); err != nil {
+			return err
+		}
+	}
+
+	redisEnqueued := false
 	if s.popularityMQ != nil {
 		if err := s.popularityMQ.Update(ctx, comment.VideoID, 1); err == nil {
 			redisEnqueued = true
 		}
 	}
-	if mysqlEnqueued && redisEnqueued {
-		s.notifyMentions(ctx, comment)
-		return nil
-	}
-
-	if !mysqlEnqueued {
-		if err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Create(comment).Error; err != nil {
-				return err
-			}
-			return tx.Model(&Video{}).Where("id = ?", comment.VideoID).
-				UpdateColumn("popularity", gorm.Expr("popularity + 1")).Error
-		}); err != nil {
-			return err
-		}
-	}
-
 	if !redisEnqueued {
 		UpdatePopularityCache(ctx, s.cache, comment.VideoID, 1)
 	}
+
 	s.notifyMentions(ctx, comment)
 	return nil
 }
@@ -83,48 +69,49 @@ func (s *CommentService) Delete(ctx context.Context, commentID uint, accountID u
 	}
 
 	mysqlEnqueued := false
-	redisEnqueued := false
 	if s.commentMQ != nil {
-		if err := s.commentMQ.Delete(ctx, commentID); err == nil {
+		if err := s.commentMQ.Delete(ctx, commentID, comment.VideoID); err == nil {
 			mysqlEnqueued = true
 		}
 	}
+	if !mysqlEnqueued {
+		if err := s.repo.DeleteComment(ctx, comment); err != nil {
+			return err
+		}
+	}
+
+	redisEnqueued := false
 	if s.popularityMQ != nil {
 		if err := s.popularityMQ.Update(ctx, comment.VideoID, -1); err == nil {
 			redisEnqueued = true
 		}
 	}
-	if mysqlEnqueued && redisEnqueued {
-		return nil
-	}
-
-	if !mysqlEnqueued {
-		if err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Delete(&Comment{}, commentID).Error; err != nil {
-				return err
-			}
-			return tx.Model(&Video{}).Where("id = ?", comment.VideoID).
-				UpdateColumn("popularity", gorm.Expr("GREATEST(popularity - 1, 0)")).Error
-		}); err != nil {
-			return err
-		}
-	}
-
 	if !redisEnqueued {
 		UpdatePopularityCache(ctx, s.cache, comment.VideoID, -1)
 	}
 	return nil
 }
 
-func (s *CommentService) GetAll(ctx context.Context, videoID uint) ([]Comment, error) {
+func (s *CommentService) GetAll(ctx context.Context, videoID, lastID uint, limit int) (GetAllCommentsResponse, error) {
 	exists, err := s.VideoRepository.IsExist(ctx, videoID)
 	if err != nil {
-		return nil, err
+		return GetAllCommentsResponse{}, err
 	}
 	if !exists {
-		return nil, apierror.ErrVideoNotFound
+		return GetAllCommentsResponse{}, apierror.ErrVideoNotFound
 	}
-	return s.repo.GetAllComments(ctx, videoID)
+	comments, err := s.repo.GetAll(ctx, videoID, lastID, limit)
+	if err != nil {
+		return GetAllCommentsResponse{}, err
+	}
+	if len(comments) == 0 {
+		return GetAllCommentsResponse{LastID: lastID}, nil
+	}
+	return GetAllCommentsResponse{
+		Comments: comments,
+		HasMore:  len(comments) == limit,
+		LastID:   comments[len(comments)-1].ID,
+	}, nil
 }
 
 func (s *CommentService) notifyMentions(ctx context.Context, comment *Comment) {
@@ -150,19 +137,22 @@ func (s *CommentService) notifyMentions(ctx context.Context, comment *Comment) {
 			SenderID:    comment.AuthorID,
 			Type:        "mention",
 			TargetID:    comment.VideoID,
-			Content:     comment.Username + " 在评论中提到了你",
+			Content:     comment.Content,
 		})
+	}
+	if len(notifs) == 0 {
+		return
 	}
 	reciIDs := make([]uint, 0, len(notifs))
 	for _, notif := range notifs {
 		reciIDs = append(reciIDs, notif.RecipientID)
 	}
 	if s.commentMQ != nil {
-		if err := s.commentMQ.Mention(ctx, comment.Username, comment.VideoID, comment.AuthorID, reciIDs); err != nil {
-			log.Printf("comment mention failed: %v", err)
+		if err := s.commentMQ.Mention(ctx, comment.Username, comment.VideoID, comment.AuthorID, reciIDs); err == nil {
+			return
 		}
 	}
 	if err := s.repo.db.WithContext(ctx).Create(&notifs).Error; err != nil {
-		log.Printf("create mention notification failed: %v", err)
+		logger.Info("DB create mention notifications failed", slog.Any("error", err))
 	}
 }

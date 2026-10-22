@@ -24,7 +24,8 @@ func (lh *LikeHandler) Like(c *gin.Context) {
 	}
 
 	accountID, _ := mw.GetAccountIDByGIN(c)
-	if err := lh.service.Like(c.Request.Context(), req.VideoID, accountID); err != nil {
+	username, _ := mw.GetUsernameByGIN(c)
+	if err := lh.service.Like(c.Request.Context(), req.VideoID, accountID, username); err != nil {
 		response.FailByErr(c, err)
 		return
 	}
@@ -38,12 +39,7 @@ func (lh *LikeHandler) Unlike(c *gin.Context) {
 		return
 	}
 	accountID, _ := mw.GetAccountIDByGIN(c)
-
-	like := &Like{
-		VideoID:   req.VideoID,
-		AccountID: accountID,
-	}
-	if err := lh.service.Unlike(c.Request.Context(), like); err != nil {
+	if err := lh.service.Unlike(c.Request.Context(), req.VideoID, accountID); err != nil {
 		response.FailByErr(c, err)
 		return
 	}
@@ -67,15 +63,23 @@ func (lh *LikeHandler) IsLiked(c *gin.Context) {
 }
 
 func (lh *LikeHandler) ListMyLikedVideos(c *gin.Context) {
-	accountID, _ := mw.GetAccountIDByGIN(c)
+	var req ListMyLikedVideosRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-	videos, err := lh.service.ListLikedVideos(c.Request.Context(), accountID)
+	if req.Limit <= 0 || req.Limit > 50 {
+		req.Limit = 20
+	}
+	accountID, _ := mw.GetAccountIDByGIN(c)
+	res, err := lh.service.ListLikedVideos(c.Request.Context(), accountID, req.LastID, req.Limit)
 	if err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-	if videos == nil {
-		videos = []Video{}
+	if res.Videos == nil {
+		res.Videos = []Video{}
 	}
-	response.Success(c, videos)
+	response.SuccessWithPage(c, res.Videos, res.HasMore, res.LastID)
 }

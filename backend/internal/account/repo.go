@@ -75,8 +75,8 @@ func (ar *AccountRepository) FindByUsername(ctx context.Context, username string
 	return &account, nil
 }
 
-func (ar *AccountRepository) FindSimilarName(ctx context.Context, username string, lastID uint, limit int) ([]*Account, error) {
-	var account []*Account
+func (ar *AccountRepository) FindSimilarName(ctx context.Context, username string, lastID uint, limit int) ([]Account, error) {
+	var account []Account
 	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(username)
 	query := ar.db.WithContext(ctx).Where(`username LIKE ? ESCAPE '\\'`, "%"+escaped+"%")
 	if lastID > 0 {

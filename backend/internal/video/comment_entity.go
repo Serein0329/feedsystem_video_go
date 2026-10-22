@@ -22,4 +22,12 @@ type DeleteCommentRequest struct {
 
 type GetAllCommentsRequest struct {
 	VideoID uint `json:"video_id" binding:"required"`
+	Limit   int  `json:"limit"`
+	LastID  uint `json:"last_id"`
+}
+
+type GetAllCommentsResponse struct {
+	Comments []Comment `json:"comments"`
+	HasMore  bool      `json:"has_more"`
+	LastID   uint      `json:"last_id"`
 }

@@ -105,15 +105,13 @@ func (w *CommentWorker) applyPublish(ctx context.Context, evt *rabbitmq.CommentE
 		AuthorID: evt.AuthorID,
 		Content:  strings.TrimSpace(evt.Content),
 	}
-	if err := w.comments.CreateComment(ctx, c); err != nil {
-		return err
-	}
-	return w.videos.ChangePopularity(ctx, evt.VideoID, 1)
+	return w.comments.CreateComment(ctx, c)
 }
 
 func (w *CommentWorker) applyDelete(ctx context.Context, evt *rabbitmq.CommentEvent) error {
-	if err := w.comments.DeleteComment(ctx, evt.CommentID); err != nil {
-		return err
+	c := &video.Comment{
+		ID:      evt.CommentID,
+		VideoID: evt.VideoID,
 	}
-	return w.videos.ChangePopularity(ctx, evt.VideoID, -1)
+	return w.comments.DeleteComment(ctx, c)
 }

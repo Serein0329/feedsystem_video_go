@@ -67,9 +67,9 @@ type RenameResponse struct {
 }
 
 type FindSimilarNameResponse struct {
-	Accounts []*Account `json:"accounts"`
-	HasMore  bool       `json:"has_more"`
-	LastID   uint       `json:"last_id"`
+	Accounts []Account `json:"accounts"`
+	HasMore  bool      `json:"has_more"`
+	LastID   uint      `json:"last_id"`
 }
 
 type GetProfileResponse struct {

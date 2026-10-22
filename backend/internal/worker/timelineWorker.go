@@ -13,7 +13,7 @@ import (
 	oredis "github.com/redis/go-redis/v9"
 )
 
-func StartOutboxConsumer(queueName string, redisClient *rediscache.Client, rmq *rabbitmq2.RabbitMQ) {
+func StartTimelineConsumer(queueName string, redisClient *rediscache.Client, rmq *rabbitmq2.RabbitMQ) {
 	if redisClient == nil || rmq == nil {
 		logger.Info("OutboxWorker Consumer: disable for rabbitmq/redis is not initialized")
 		return

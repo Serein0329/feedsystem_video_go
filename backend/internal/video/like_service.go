@@ -19,7 +19,7 @@ func NewLikeService(repo *LikeRepository, videoRepo *VideoRepository, cache *red
 	return &LikeService{repo: repo, VideoRepo: videoRepo, cache: cache, likeMQ: likeMQ, popularityMQ: popularityMQ}
 }
 
-func (s *LikeService) Like(ctx context.Context, videoID, accountID uint) error {
+func (s *LikeService) Like(ctx context.Context, videoID, accountID uint, username string) error {
 	ok, err := s.VideoRepo.IsExist(ctx, videoID)
 	if err != nil {
 		return err
@@ -39,7 +39,7 @@ func (s *LikeService) Like(ctx context.Context, videoID, accountID uint) error {
 	mysqlEnqueued := false
 	redisEnqueued := false
 	if s.likeMQ != nil {
-		if err := s.likeMQ.Like(ctx, accountID, videoID); err == nil {
+		if err := s.likeMQ.Like(ctx, videoID, accountID, username); err == nil {
 			mysqlEnqueued = true
 		}
 	}
@@ -64,8 +64,8 @@ func (s *LikeService) Like(ctx context.Context, videoID, accountID uint) error {
 	return nil
 }
 
-func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
-	ok, err := s.VideoRepo.IsExist(ctx, like.VideoID)
+func (s *LikeService) Unlike(ctx context.Context, videoID, accountID uint) error {
+	ok, err := s.VideoRepo.IsExist(ctx, videoID)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 		return apierror.ErrVideoNotFound
 	}
 
-	isLiked, err := s.repo.IsLiked(ctx, like.VideoID, like.AccountID)
+	isLiked, err := s.repo.IsLiked(ctx, videoID, accountID)
 	if err != nil {
 		return err
 	}
@@ -84,12 +84,12 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 	mysqlEnqueued := false
 	redisEnqueued := false
 	if s.likeMQ != nil {
-		if err := s.likeMQ.Unlike(ctx, like.AccountID, like.VideoID); err == nil {
+		if err := s.likeMQ.Unlike(ctx, videoID, accountID); err == nil {
 			mysqlEnqueued = true
 		}
 	}
 	if s.popularityMQ != nil {
-		if err := s.popularityMQ.Update(ctx, like.VideoID, -1); err == nil {
+		if err := s.popularityMQ.Update(ctx, videoID, -1); err == nil {
 			redisEnqueued = true
 		}
 	}
@@ -98,13 +98,13 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 	}
 
 	if !mysqlEnqueued {
-		if err := s.repo.Unlike(ctx, like.VideoID, like.AccountID); err != nil {
+		if err := s.repo.Unlike(ctx, videoID, accountID); err != nil {
 			return err
 		}
 	}
 
 	if !redisEnqueued {
-		UpdatePopularityCache(ctx, s.cache, like.VideoID, -1)
+		UpdatePopularityCache(ctx, s.cache, videoID, -1)
 	}
 	return nil
 }
@@ -120,6 +120,21 @@ func (s *LikeService) IsLiked(ctx context.Context, videoID, accountID uint) (boo
 	return s.repo.IsLiked(ctx, videoID, accountID)
 }
 
-func (s *LikeService) ListLikedVideos(ctx context.Context, accountID uint) ([]Video, error) {
-	return s.repo.ListLikedVideos(ctx, accountID)
+func (s *LikeService) ListLikedVideos(ctx context.Context, accountID, lastID uint, limit int) (ListMyLikedVideosResponse, error) {
+	rows, err := s.repo.ListLikedVideos(ctx, accountID, lastID, limit)
+	if err != nil {
+		return ListMyLikedVideosResponse{}, err
+	}
+	videos := make([]Video, 0, len(rows))
+	for i := range rows {
+		videos = append(videos, rows[i].Video)
+	}
+	if len(rows) == 0 {
+		return ListMyLikedVideosResponse{LastID: lastID}, nil
+	}
+	return ListMyLikedVideosResponse{
+		Videos:  videos,
+		LastID:  rows[len(rows)-1].LikeID,
+		HasMore: len(rows) == limit,
+	}, nil
 }

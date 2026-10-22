@@ -50,10 +50,10 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	loginLimiter := mw.LimitHandler(cache, "account_login", 10, time.Minute, mw.KeyByIP)
 	registerLimiter := mw.LimitHandler(cache, "account_register", 5, time.Hour, mw.KeyByIP)
 	refreshLimiter := mw.LimitHandler(cache, "account_refresh", 20, time.Hour, mw.KeyByIP)
+	chunkLimiter := mw.LimitHandler(cache, "video_chunk", 120, time.Minute, mw.KeyByAccount)
 	likeLimiter := mw.LimitHandler(cache, "video_like", 30, time.Minute, mw.KeyByAccount)
 	commentLimiter := mw.LimitHandler(cache, "video_comment", 10, time.Minute, mw.KeyByAccount)
 	socialLimiter := mw.LimitHandler(cache, "social_follow", 20, time.Minute, mw.KeyByAccount)
-	chunkLimiter := mw.LimitHandler(cache, "video_chunk", 120, time.Minute, mw.KeyByAccount)
 
 	// account
 	accountRepository := account.NewAccountRepository(db)
@@ -85,13 +85,13 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 		logger.Info("PopularityMQ init failed", slog.Any("error", err))
 		timelineMQ = nil
 	}
-	videoService := video.NewVideoService(videoRepository, cache, timelineMQ)
-	videoHandler := video.NewVideoHandler(videoService, accountService)
+	videoService := video.NewVideoService(videoRepository, accountRepository, cache, timelineMQ)
+	videoHandler := video.NewVideoHandler(videoService)
 	chunkHandler := video.NewChunkUploadHandler(cache)
 	videoGroup := r.Group("/video")
 	{
 		videoGroup.POST("/listByAuthorID", videoHandler.ListByAuthorID)
-		videoGroup.POST("/getDetail", videoHandler.GetDetail)
+		videoGroup.POST("/getByID", videoHandler.GetByID)
 		videoGroup.POST("/search", videoHandler.SearchVideos)
 	}
 	protectedVideoGroup := videoGroup.Group("")
@@ -139,11 +139,12 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	commentRepository := video.NewCommentRepository(db)
 	commentService := video.NewCommentService(commentRepository, videoRepository, cache, commentMQ, popularityMQ)
 	commentHandler := video.NewCommentHandler(commentService, accountService)
-	commentGroup := r.Group("/comment")
+	publicCommentGroup := r.Group("/comment")
+	publicCommentGroup.Use(mw.JWTAuthHandler(accountRepository, cache, false))
 	{
-		commentGroup.POST("/listAll", commentHandler.GetAllComments)
+		publicCommentGroup.POST("/listAll", commentHandler.GetAllComments)
 	}
-	protectedCommentGroup := commentGroup.Group("")
+	protectedCommentGroup := r.Group("/comment")
 	protectedCommentGroup.Use(mw.JWTAuthHandler(accountRepository, cache, true))
 	{
 		protectedCommentGroup.POST("/publish", commentLimiter, commentHandler.PublishComment)
@@ -165,6 +166,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	{
 		protectedSocialGroup.POST("/follow", socialLimiter, socialHandler.Follow)
 		protectedSocialGroup.POST("/unfollow", socialLimiter, socialHandler.Unfollow)
+		protectedSocialGroup.POST("/isfollowed", socialHandler.Isfollowed)
 		protectedSocialGroup.POST("/getAllFollowers", socialHandler.GetAllFollowers)
 		protectedSocialGroup.POST("/getAllVloggers", socialHandler.GetAllVloggers)
 		protectedSocialGroup.POST("/getCounts", socialHandler.GetCounts)
@@ -213,15 +215,15 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	feedRepository := feed.NewFeedRepository(db)
 	feedService := feed.NewFeedService(feedRepository, likeRepository, cache)
 	feedHandler := feed.NewFeedHandler(feedService)
-	feedGroup := r.Group("/feed")
-	feedGroup.Use(mw.JWTAuthHandler(accountRepository, cache, false))
+	publicFeedGroup := r.Group("/feed")
+	publicFeedGroup.Use(mw.JWTAuthHandler(accountRepository, cache, false))
 	{
-		feedGroup.POST("/listLatest", feedHandler.ListLatest)
-		feedGroup.POST("/listLikesCount", feedHandler.ListLikesCount)
-		feedGroup.POST("/listByPopularity", feedHandler.ListByPopularity)
-		feedGroup.POST("/listByTag", feedHandler.ListByTag)
+		publicFeedGroup.POST("/listLatest", feedHandler.ListLatest)
+		publicFeedGroup.POST("/listLikesCount", feedHandler.ListLikesCount)
+		publicFeedGroup.POST("/listByPopularity", feedHandler.ListByPopularity)
+		publicFeedGroup.POST("/listByTag", feedHandler.ListByTag)
 	}
-	protectedFeedGroup := feedGroup.Group("")
+	protectedFeedGroup := r.Group("/feed")
 	protectedFeedGroup.Use(mw.JWTAuthHandler(accountRepository, cache, true))
 	{
 		protectedFeedGroup.POST("/listByFollowing", feedHandler.ListByFollowing)
@@ -249,7 +251,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	notifGroup.POST("/unreadCount", sseHub.UnreadCountHandler)
 
 	//Worker
-	worker.StartOutboxConsumer("video.timeline.events", cache, rmq)
+	worker.StartTimelineConsumer(rabbitmq2.TimelineQueue, cache, rmq)
 	go func() {
 		if rmq != nil {
 			if err := rabbitmq2.NewNotificationMQ(rmq); err != nil {

@@ -80,17 +80,18 @@ func (r *LikeRepository) BatchGetLiked(ctx context.Context, videoIDs []uint, acc
 	return likeMap, nil
 }
 
-func (r *LikeRepository) ListLikedVideos(ctx context.Context, accountID uint) ([]Video, error) {
-	var videos []Video
-	err := r.db.WithContext(ctx).
-		Model(&Video{}).
+func (r *LikeRepository) ListLikedVideos(ctx context.Context, accountID, lastID uint, limit int) ([]LikedVideo, error) {
+	var rows []LikedVideo
+	query := r.db.WithContext(ctx).
+		Table("videos").
+		Select("videos.*, likes.id AS like_id").
 		Joins("JOIN likes ON likes.video_id = videos.id").
-		Where("likes.account_id = ?", accountID).
-		Order("likes.created_at desc").
-		Limit(200).
-		Find(&videos).Error
-	if err != nil {
+		Where("likes.account_id = ?", accountID)
+	if lastID > 0 {
+		query = query.Where("likes.id < ?", lastID)
+	}
+	if err := query.Order("likes.id desc").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	return videos, nil
+	return rows, nil
 }

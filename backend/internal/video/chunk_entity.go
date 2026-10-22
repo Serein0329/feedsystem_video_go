@@ -9,6 +9,7 @@ type ChunkUploadSession struct {
 	AccountID    uint   `json:"account_id"`
 	Filename     string `json:"filename"`
 	FileSize     int64  `json:"file_size"`
+	ChunkSize    int64  `json:"chunk_size"`
 	TotalChunks  int    `json:"total_chunks"`
 	FileHash     string `json:"file_hash"`
 	UploadedBits []bool `json:"uploaded_bits"`

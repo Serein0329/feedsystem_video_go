@@ -26,6 +26,7 @@ type LikeEvent struct {
 	EventID    string    `json:"event_id"`
 	Action     string    `json:"action"`
 	UserID     uint      `json:"user_id"`
+	Username   string    `json:"username"`
 	VideoID    uint      `json:"video_id"`
 	OccurredAt time.Time `json:"occurred_at"`
 }
@@ -45,15 +46,22 @@ func NewLikeMQ(base *RabbitMQ) (*LikeMQ, error) {
 	return &LikeMQ{ch: ch}, nil
 }
 
-func (l *LikeMQ) Like(ctx context.Context, userID, videoID uint) error {
-	return l.publish(ctx, "like", LikeLikeRK, userID, videoID)
+func (l *LikeMQ) Like(ctx context.Context, videoID, userID uint, username string) error {
+	return l.publish(ctx, "like", LikeLikeRK, LikeEvent{
+		UserID:   userID,
+		VideoID:  videoID,
+		Username: username,
+	})
 }
 
-func (l *LikeMQ) Unlike(ctx context.Context, userID, videoID uint) error {
-	return l.publish(ctx, "unlike", LikeUnlikeRK, userID, videoID)
+func (l *LikeMQ) Unlike(ctx context.Context, videoID, userID uint) error {
+	return l.publish(ctx, "unlike", LikeUnlikeRK, LikeEvent{
+		UserID:  userID,
+		VideoID: videoID,
+	})
 }
 
-func (l *LikeMQ) publish(ctx context.Context, action, routingKey string, userID, videoID uint) error {
+func (l *LikeMQ) publish(ctx context.Context, action, routingKey string, evt LikeEvent) error {
 	if l == nil || l.ch == nil {
 		return errors.New("like mq is not initialized")
 	}
@@ -61,12 +69,8 @@ func (l *LikeMQ) publish(ctx context.Context, action, routingKey string, userID,
 	if err != nil {
 		return err
 	}
-	event := LikeEvent{
-		EventID:    id,
-		Action:     action,
-		UserID:     userID,
-		VideoID:    videoID,
-		OccurredAt: time.Now(),
-	}
-	return PublishJSON(ctx, l.ch, LikeExchange, routingKey, event)
+	evt.EventID = id
+	evt.Action = action
+	evt.OccurredAt = time.Now()
+	return PublishJSON(ctx, l.ch, LikeExchange, routingKey, evt)
 }

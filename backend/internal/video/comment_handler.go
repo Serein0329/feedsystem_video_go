@@ -5,6 +5,7 @@ import (
 	"feedsystem_video_go/internal/mw"
 	"feedsystem_video_go/internal/pkg/apierror"
 	"feedsystem_video_go/internal/pkg/response"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,14 +24,15 @@ func (h *CommentHandler) PublishComment(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	authorId, _ := mw.GetAccountIDByGIN(c)
-	user, err := h.accountService.FindByID(c.Request.Context(), authorId)
-	if err != nil {
-		response.FailByErr(c, err)
+	req.Content = strings.TrimSpace(req.Content)
+	if req.Content == "" {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "comment content is empty"})
 		return
 	}
+	authorId, _ := mw.GetAccountIDByGIN(c)
+	username, _ := mw.GetUsernameByGIN(c)
 	comment := &Comment{
-		Username: user.Username,
+		Username: username,
 		VideoID:  req.VideoID,
 		AuthorID: authorId,
 		Content:  req.Content,
@@ -63,13 +65,20 @@ func (h *CommentHandler) GetAllComments(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	comments, err := h.service.GetAll(c.Request.Context(), req.VideoID)
+	if req.Limit <= 0 || req.Limit > 50 {
+		req.Limit = 20
+	}
+	if _, err := mw.GetAccountIDByGIN(c); err != nil {
+		req.Limit = 10
+		req.LastID = 0
+	}
+	res, err := h.service.GetAll(c.Request.Context(), req.VideoID, req.LastID, req.Limit)
 	if err != nil {
 		response.FailByErr(c, err)
 		return
 	}
-	if comments == nil {
-		comments = []Comment{}
+	if res.Comments == nil {
+		res.Comments = []Comment{}
 	}
-	response.Success(c, comments)
+	response.SuccessWithPage(c, res.Comments, res.HasMore, res.LastID)
 }

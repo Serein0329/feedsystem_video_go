@@ -28,20 +28,20 @@ func (vr *VideoRepository) DeleteVideo(ctx context.Context, id uint) error {
 	return vr.db.WithContext(ctx).Delete(&Video{}, id).Error
 }
 
-func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID uint) ([]Video, error) {
+func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID, lastID uint, limit int) ([]Video, error) {
 	var videos []Video
-	if err := vr.db.WithContext(ctx).
-		Where("author_id = ?", authorID).
-		Order("create_time desc").
-		Limit(200).
-		Find(&videos).Error; err != nil {
+	query := vr.db.WithContext(ctx).Where("author_id = ?", authorID)
+	if lastID > 0 {
+		query = query.Where("id < ?", lastID)
+	}
+	if err := query.Order("id desc").Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil
 }
 
-func (vr *VideoRepository) SearchByKeyword(ctx context.Context, keyword string, lastID uint, limit int) ([]*Video, error) {
-	var videos []*Video
+func (vr *VideoRepository) SearchByKeyword(ctx context.Context, keyword string, lastID uint, limit int) ([]Video, error) {
+	var videos []Video
 	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(keyword)
 	pattern := "%" + escaped + "%"
 
@@ -73,24 +73,6 @@ func (vr *VideoRepository) IsExist(ctx context.Context, id uint) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
-}
-
-func (vr *VideoRepository) ChangeLikesCount(ctx context.Context, id uint, change int64) error {
-	if err := vr.db.WithContext(ctx).Model(&Video{}).
-		Where("id = ?", id).
-		UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count + ?, 0)", change)).Error; err != nil {
-		return err
-	}
-	return nil
-}
-
-func (vr *VideoRepository) ChangePopularity(ctx context.Context, id uint, change int64) error {
-	if err := vr.db.WithContext(ctx).Model(&Video{}).
-		Where("id = ?", id).
-		UpdateColumn("popularity", gorm.Expr("GREATEST(popularity + ?, 0)", change)).Error; err != nil {
-		return err
-	}
-	return nil
 }
 
 func (vr *VideoRepository) CountByAuthor(ctx context.Context, authorID uint) (int64, error) {
