@@ -80,5 +80,5 @@ func (h *CommentHandler) GetAllComments(c *gin.Context) {
 	if res.Comments == nil {
 		res.Comments = []Comment{}
 	}
-	response.SuccessWithPage(c, res.Comments, res.HasMore, res.LastID)
+	response.SuccessWithPage(c, res.Comments, res.HasMore, res.NextID)
 }

@@ -148,11 +148,11 @@ func (h *ChunkUploadHandler) InitChunkUpload(c *gin.Context) {
 		if sessErr == nil {
 			// Refresh TTL on resume
 			if err := h.cache.SetBytes(c.Request.Context(), hashKey, existingID, sessionTTL); err != nil {
-				logger.Info("set cache failed", slog.String("key", hashKey), slog.String("err", err.Error()))
+				logger.Info("Chunk : Set cache failed", slog.String("key", hashKey), slog.String("err", err.Error()))
 			}
 			sessionKey := h.sessionKey(session.UploadID)
 			if err := h.cache.Expire(c.Request.Context(), sessionKey, sessionTTL); err != nil {
-				logger.Info("set cache expired failed", slog.String("key", sessionKey), slog.String("err", err.Error()))
+				logger.Info("Chunk : Set cache expired failed", slog.String("key", sessionKey), slog.String("err", err.Error()))
 			}
 			response.Success(c, InitChunkUploadResponse{
 				UploadID:       session.UploadID,
@@ -204,7 +204,7 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxChunkSize+1<<20)
 
 	var req UploadChunkRequest
-	if err := c.ShouldBind(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -468,10 +468,10 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	sessionKey := h.sessionKey(req.UploadID)
 	hashKey := h.hashKey(accountID, session.FileHash)
 	if err := h.cache.Del(c.Request.Context(), sessionKey); err != nil {
-		logger.Info("Del cache failed", slog.String("key", sessionKey), slog.Any("error", err))
+		logger.Info("Chunk : Del cache failed", slog.String("key", sessionKey), slog.Any("error", err))
 	}
 	if err := h.cache.Del(c.Request.Context(), hashKey); err != nil {
-		logger.Info("Del cache failed", slog.String("key", hashKey), slog.Any("error", err))
+		logger.Info("Chunk : Del cache failed", slog.String("key", hashKey), slog.Any("error", err))
 	}
 	urlPath := fmt.Sprintf("/static/videos/%d/%s/%s.mp4", accountID, date, filename)
 

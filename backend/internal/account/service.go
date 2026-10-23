@@ -53,10 +53,10 @@ func (as *AccountService) Rename(ctx context.Context, accountID uint, newUsernam
 		accessKey := as.cache.Key("account:%d:access", accountID)
 		refreshKey := as.cache.Key("account:%d:refresh", accountID)
 		if err := as.cache.SetBytes(cacheCtx, accessKey, []byte(token), 24*time.Hour); err != nil {
-			logger.Info("Set cache failed", slog.String("key", accessKey), slog.Any("error", err))
+			logger.Info("Account : Set cache failed", slog.String("key", accessKey), slog.Any("error", err))
 		}
 		if err := as.cache.SetBytes(cacheCtx, refreshKey, []byte(refreshToken), 7*24*time.Hour); err != nil {
-			logger.Info("Set cache failed", slog.String("key", refreshKey), slog.Any("error", err))
+			logger.Info("Account : Set cache failed", slog.String("key", refreshKey), slog.Any("error", err))
 		}
 	}
 	return RenameResponse{
@@ -91,7 +91,7 @@ func (as *AccountService) FindByID(ctx context.Context, id uint) (*Account, erro
 }
 
 func (as *AccountService) FindByUsername(ctx context.Context, username string) (*Account, error) {
-	return as.accountRepository.FindByUsername(ctx, strings.TrimSpace(username))
+	return as.accountRepository.FindByUsername(ctx, username)
 }
 
 func (as *AccountService) FindSimilarName(ctx context.Context, username string, lastID uint, limit int) (FindSimilarNameResponse, error) {
@@ -100,17 +100,17 @@ func (as *AccountService) FindSimilarName(ctx context.Context, username string, 
 		return FindSimilarNameResponse{}, err
 	}
 	if len(accs) == 0 {
-		return FindSimilarNameResponse{LastID: lastID}, nil
+		return FindSimilarNameResponse{NextID: lastID}, nil
 	}
 	return FindSimilarNameResponse{
 		Accounts: accs,
 		HasMore:  len(accs) == limit,
-		LastID:   accs[len(accs)-1].ID,
+		NextID:   accs[len(accs)-1].ID,
 	}, nil
 }
 
 func (as *AccountService) Login(ctx context.Context, username, password string) (LoginResponse, error) {
-	account, err := as.accountRepository.FindByUsername(ctx, strings.TrimSpace(username))
+	account, err := as.accountRepository.FindByUsername(ctx, username)
 	if err != nil {
 		return LoginResponse{}, err
 	}
@@ -135,10 +135,10 @@ func (as *AccountService) Login(ctx context.Context, username, password string) 
 		accessKey := as.cache.Key("account:%d:access", account.ID)
 		refreshKey := as.cache.Key("account:%d:refresh", account.ID)
 		if err := as.cache.SetBytes(cacheCtx, accessKey, []byte(accessToken), 24*time.Hour); err != nil {
-			logger.Info("Set cache failed", slog.String("key", accessKey), slog.Any("error", err))
+			logger.Info("Account : Set cache failed", slog.String("key", accessKey), slog.Any("error", err))
 		}
 		if err := as.cache.SetBytes(cacheCtx, refreshKey, []byte(refreshToken), 7*24*time.Hour); err != nil {
-			logger.Info("Set cache failed", slog.String("key", refreshKey), slog.Any("error", err))
+			logger.Info("Account : Set cache failed", slog.String("key", refreshKey), slog.Any("error", err))
 		}
 	}
 	return LoginResponse{
@@ -162,10 +162,10 @@ func (as *AccountService) Logout(ctx context.Context, accountID uint) error {
 		accessKey := as.cache.Key("account:%d:access", account.ID)
 		refreshKey := as.cache.Key("account:%d:refresh", account.ID)
 		if err := as.cache.Del(cacheCtx, accessKey); err != nil {
-			logger.Info("Del cache failed", slog.String("key", accessKey), slog.Any("error", err))
+			logger.Info("Account : Del cache failed", slog.String("key", accessKey), slog.Any("error", err))
 		}
 		if err := as.cache.Del(cacheCtx, refreshKey); err != nil {
-			logger.Info("Del cache failed", slog.String("key", refreshKey), slog.Any("error", err))
+			logger.Info("Account : Del cache failed", slog.String("key", refreshKey), slog.Any("error", err))
 		}
 	}
 	return as.accountRepository.Logout(ctx, account.ID)
@@ -197,7 +197,7 @@ func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, usern
 				}
 				key := as.cache.Key("account:%d:access", id)
 				if err := as.cache.SetBytes(cacheCtx, key, []byte(newToken), 24*time.Hour); err != nil {
-					logger.Info("Set cache failed", slog.String("key", key), slog.Any("error", err))
+					logger.Info("Account : Set cache failed", slog.String("key", key), slog.Any("error", err))
 				}
 				return newToken, nil
 			}
@@ -221,7 +221,7 @@ func (as *AccountService) RefreshAccessToken(ctx context.Context, id uint, usern
 			defer cancel()
 			key := as.cache.Key("account:%d:access", id)
 			if err := as.cache.SetBytes(cacheCtx, key, []byte(newToken), 24*time.Hour); err != nil {
-				logger.Info("Set cache failed", slog.String("key", key), slog.Any("error", err))
+				logger.Info("Account : Set cache failed", slog.String("key", key), slog.Any("error", err))
 			}
 		}
 		return newToken, nil

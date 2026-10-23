@@ -172,7 +172,7 @@ func (vh *VideoHandler) SearchVideos(c *gin.Context) {
 	if res.Videos == nil {
 		res.Videos = []Video{}
 	}
-	response.SuccessWithPage(c, res.Videos, res.HasMore, res.LastID)
+	response.SuccessWithPage(c, res.Videos, res.HasMore, res.NextID)
 }
 
 func (vh *VideoHandler) DeleteVideo(c *gin.Context) {
@@ -207,7 +207,7 @@ func (vh *VideoHandler) ListByAuthorID(c *gin.Context) {
 	if res.Videos == nil {
 		res.Videos = []Video{}
 	}
-	response.SuccessWithPage(c, res.Videos, res.HasMore, res.LastID)
+	response.SuccessWithPage(c, res.Videos, res.HasMore, res.NextID)
 }
 
 func (vh *VideoHandler) GetByID(c *gin.Context) {

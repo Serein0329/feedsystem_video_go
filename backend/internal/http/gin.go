@@ -15,7 +15,6 @@ import (
 	"feedsystem_video_go/internal/sse"
 	"feedsystem_video_go/internal/video"
 	"feedsystem_video_go/internal/worker"
-	"log"
 	"log/slog"
 	"time"
 
@@ -24,11 +23,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin.Engine {
+func SetGIN(ctx context.Context, db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	if err := r.SetTrustedProxies(nil); err != nil {
-		log.Printf("SetTrustedProxies failed: %v", err)
+		logger.Info("GIN : SetTrustedProxies failed", slog.Any("error", err))
 	}
 	r.Use(mw.RecoveryHandler())
 	r.Use(mw.LoggerHandler())
@@ -154,7 +153,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	// social
 	socialMQ, err := rabbitmq2.NewSocialMQ(rmq)
 	if err != nil {
-		log.Printf("SocialMQ init failed: %v", err)
+		logger.Info("SocialMQ init failed", slog.Any("error", err))
 		socialMQ = nil
 	}
 	socialRepository := social.NewSocialRepository(db)
@@ -231,7 +230,7 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 
 	// message
 	messageRepo := message.NewRepository(db)
-	messageService := message.NewService(messageRepo)
+	messageService := message.NewService(messageRepo, accountRepository)
 	messageHandler := message.NewHandler(messageService)
 	messageGroup := r.Group("/message")
 	protectedMessageGroup := messageGroup.Group("")
@@ -251,61 +250,68 @@ func SetGIN(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin
 	notifGroup.POST("/unreadCount", sseHub.UnreadCountHandler)
 
 	//Worker
-	go func() {
-		if rmq != nil {
-			if err := rabbitmq2.NewNotificationMQ(rmq); err != nil {
-				log.Printf("notification topics init failed: %v", err)
-			}
-			if err := worker.NewNotificationWorker(rmq, db, sseHub).Run(context.Background()); err != nil {
-				log.Printf("NotificationWorker Run err: %v", err.Error())
-			}
-		} else {
-			log.Printf("Notification SSE disabled")
-		}
-	}()
-	go runWorkerWithRetry("TimelineWorker", rmq, func(ch *amqp.Channel) error {
-		return worker.NewTimelineWorker(ch, cache, rabbitmq2.TimelineQueue).Run(context.Background())
+	go runWorkerWithRetry(ctx, "SocialWorker", rmq, func(ch *amqp.Channel) error {
+		return worker.NewSocialWorker(ch, socialRepository, rabbitmq2.SocialQueue).Run(ctx)
 	})
-	go runWorkerWithRetry("SocialWorker", rmq, func(ch *amqp.Channel) error {
-		return worker.NewSocialWorker(ch, socialRepository, rabbitmq2.SocialQueue).Run(context.Background())
+	go runWorkerWithRetry(ctx, "LikeWorker", rmq, func(ch *amqp.Channel) error {
+		return worker.NewLikeWorker(ch, likeRepository, videoRepository, rabbitmq2.LikeQueue).Run(ctx)
 	})
-	go runWorkerWithRetry("LikeWorker", rmq, func(ch *amqp.Channel) error {
-		return worker.NewLikeWorker(ch, likeRepository, videoRepository, rabbitmq2.LikeQueue).Run(context.Background())
+	go runWorkerWithRetry(ctx, "CommentWorker", rmq, func(ch *amqp.Channel) error {
+		return worker.NewCommentWorker(ch, commentRepository, rabbitmq2.CommentQueue).Run(ctx)
 	})
-	go runWorkerWithRetry("CommentWorker", rmq, func(ch *amqp.Channel) error {
-		return worker.NewCommentWorker(ch, commentRepository, rabbitmq2.CommentQueue).Run(context.Background())
-	})
+	for _, q := range rabbitmq2.NotificationQueues() {
+		go runWorkerWithRetry(ctx, "NotificationWorker", rmq, func(ch *amqp.Channel) error {
+			return worker.NewNotificationWorker(q, ch, db, sseHub).Run(ctx)
+		})
+	}
 	if cache != nil {
-		go runWorkerWithRetry("PopularityWorker", rmq, func(ch *amqp.Channel) error {
-			return worker.NewPopularityWorker(ch, cache, "video.popularity.events").Run(context.Background())
+		go runWorkerWithRetry(ctx, "PopularityWorker", rmq, func(ch *amqp.Channel) error {
+			return worker.NewPopularityWorker(ch, cache, rabbitmq2.PopularityQueue).Run(ctx)
+		})
+		go runWorkerWithRetry(ctx, "TimelineWorker", rmq, func(ch *amqp.Channel) error {
+			return worker.NewTimelineWorker(ch, cache, rabbitmq2.TimelineQueue).Run(ctx)
 		})
 	}
 	return r
 }
 
-func runWorkerWithRetry(name string, rmq *rabbitmq2.RabbitMQ, fn func(*amqp.Channel) error) {
+func runWorkerWithRetry(ctx context.Context, name string, rmq *rabbitmq2.RabbitMQ, fn func(*amqp.Channel) error) {
 	if rmq == nil {
 		logger.Info("Worker disable for rabbitmq is not initialized", slog.String("name", name))
 		return
 	}
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		ch, err := rmq.Conn.Channel()
 		if err != nil {
-			logger.Info("Worker 创建Channel 失败,5秒后重试", slog.String("name", name), slog.Any("error", err))
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 		if err := ch.Qos(50, 0, false); err != nil {
-			logger.Info("Worker QoS设置失败, 5秒后重试", slog.String("name", name), slog.Any("error", err))
 			_ = ch.Close()
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 
-		if err := fn(ch); err != nil {
+		if err := fn(ch); err != nil && ctx.Err() == nil {
 			logger.Info("Worker 消费Queue失败, 5秒后重连", slog.String("name", name), slog.Any("error", err))
 		}
 		_ = ch.Close()
-		time.Sleep(5 * time.Second)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
 	}
 }

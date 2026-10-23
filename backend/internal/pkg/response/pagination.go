@@ -5,13 +5,13 @@ import "github.com/gin-gonic/gin"
 type PageResult struct {
 	List    any  `json:"list"`
 	HasMore bool `json:"has_more"`
-	LastID  uint `json:"last_id"`
+	NextID  uint `json:"next_id"`
 }
 
-func SuccessWithPage(c *gin.Context, list any, hasMore bool, lastID uint) {
+func SuccessWithPage(c *gin.Context, list any, hasMore bool, nextID uint) {
 	Success(c, PageResult{
 		List:    list,
 		HasMore: hasMore,
-		LastID:  lastID,
+		NextID:  nextID,
 	})
 }

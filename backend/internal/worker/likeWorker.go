@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"feedsystem_video_go/internal/db/rabbitmq"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/video"
-	"log"
+	"fmt"
+	"log/slog"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -24,7 +26,7 @@ func NewLikeWorker(ch *amqp.Channel, likes *video.LikeRepository, videos *video.
 
 func (w *LikeWorker) Run(ctx context.Context) error {
 	if w == nil || w.ch == nil {
-		return errors.New("like worker is not initialized")
+		return errors.New("LikeWorker is not initialized")
 	}
 	if w.queue == "" {
 		return errors.New("queue is required")
@@ -67,12 +69,12 @@ func (w *LikeWorker) handleDelivery(ctx context.Context, d amqp.Delivery) {
 		}
 		if err := w.process(ctx, d.Body); err != nil {
 			if i >= maxRetries {
-				log.Printf("like worker: 重试 %d 次后仍失败, 丢弃: %v", maxRetries, err)
-				_ = d.Ack(false)
+				logger.Info("LikeWorker : 重试后仍失败, 丢弃", slog.Int("maxRetries", maxRetries), slog.Any("error", err))
+				_ = d.Nack(false, !d.Redelivered)
 				return
 			}
 			wait := time.Duration(1<<i) * time.Second
-			log.Printf("like worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
+			logger.Info(fmt.Sprintf("LikeWorker : 处理失败, 等待一顿时间后重试(%d/%d)", i+1, maxRetries), slog.Int("wait", int(wait)), slog.Any("error", err))
 			time.Sleep(wait)
 			continue
 		}

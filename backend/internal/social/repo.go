@@ -46,29 +46,33 @@ func (r *SocialRepository) IsFollowed(ctx context.Context, followerID, vloggerID
 	return count > 0, nil
 }
 
-func (r *SocialRepository) GetAllFollowers(ctx context.Context, VloggerID uint) ([]*account.Account, error) {
-	var followers []*account.Account
-	if err := r.db.WithContext(ctx).
+func (r *SocialRepository) GetAllFollowers(ctx context.Context, VloggerID, lastID uint, limit int) ([]account.Account, error) {
+	var followers []account.Account
+	query := r.db.WithContext(ctx).
 		Model(&account.Account{}).
 		Select("accounts.*").
 		Joins("JOIN socials s ON s.follower_id = accounts.id").
-		Where("s.vlogger_id = ?", VloggerID).
-		Limit(200).
-		Find(&followers).Error; err != nil {
+		Where("s.vlogger_id = ?", VloggerID)
+	if lastID > 0 {
+		query = query.Where("s.follower_id > ?", lastID)
+	}
+	if err := query.Order("follower_id").Limit(limit).Find(&followers).Error; err != nil {
 		return nil, err
 	}
 	return followers, nil
 }
 
-func (r *SocialRepository) GetAllVloggers(ctx context.Context, FollowerID uint) ([]*account.Account, error) {
-	var vloggers []*account.Account
-	if err := r.db.WithContext(ctx).
+func (r *SocialRepository) GetAllVloggers(ctx context.Context, FollowerID, lastID uint, limit int) ([]account.Account, error) {
+	var vloggers []account.Account
+	query := r.db.WithContext(ctx).
 		Model(&account.Account{}).
 		Select("accounts.*").
 		Joins("JOIN socials s ON s.vlogger_id = accounts.id").
-		Where("s.follower_id = ?", FollowerID).
-		Limit(200).
-		Find(&vloggers).Error; err != nil {
+		Where("s.follower_id = ?", FollowerID)
+	if lastID > 0 {
+		query = query.Where("s.vlogger_id > ?", lastID)
+	}
+	if err := query.Order("s.vlogger_id").Limit(limit).Find(&vloggers).Error; err != nil {
 		return nil, err
 	}
 	return vloggers, nil

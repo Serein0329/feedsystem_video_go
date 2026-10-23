@@ -19,7 +19,7 @@ func main() {
 
 	//导入.env文件到环境变量
 	if err := godotenv.Load(); err != nil {
-		logger.Info("load .env file failed", slog.Any("error", err))
+		logger.Info("Load .env file failed", slog.Any("error", err))
 	}
 
 	//获取配置文件
@@ -30,7 +30,7 @@ func main() {
 	logger.Info("Loading config from " + configPath)
 	cfg, usedDefault, err := config.LoadLocalDev(configPath)
 	if err != nil {
-		logger.Fatal("load config failed", slog.Any("error", err))
+		logger.Fatal("Load config failed", slog.Any("error", err))
 	}
 	if usedDefault {
 		logger.Info("Config file not found, using default local config", slog.String("path", configPath))
@@ -41,10 +41,10 @@ func main() {
 	// 连接数据库
 	sqlDB, err := mysql.NewDB(&cfg.Database)
 	if err != nil {
-		logger.Fatal("Failed to connect database", slog.Any("error", err))
+		logger.Fatal("Connect database failed", slog.Any("error", err))
 	}
 	if err := mysql.AutoMigrate(sqlDB); err != nil {
-		logger.Fatal("Failed to auto migrate database", slog.Any("error", err))
+		logger.Fatal("Auto migrate database failed", slog.Any("error", err))
 	}
 	defer func() { _ = mysql.CloseDB(sqlDB) }()
 
@@ -71,7 +71,7 @@ func main() {
 	// Pprof
 	pprofServer, err := apphttp.NewPprofServer(&cfg.Pprof)
 	if err != nil {
-		logger.Warn("Failed to start pprof server", slog.Any("error", err))
+		logger.Warn("Pprof start failed", slog.Any("error", err))
 	}
 	if pprofServer != nil {
 		defer pprofServer.Shutdown()
@@ -79,6 +79,6 @@ func main() {
 
 	// GIN
 	if err := apphttp.Start(&cfg.Server, sqlDB, cache, rmq); err != nil {
-		logger.Fatal("Failed to start app server", slog.Any("error", err))
+		logger.Fatal("App start failed", slog.Any("error", err))
 	}
 }

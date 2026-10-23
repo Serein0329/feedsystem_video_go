@@ -19,31 +19,30 @@ func NewFeedRepository(db *gorm.DB) *FeedRepository {
 
 func (repo *FeedRepository) ListLatest(ctx context.Context, limit int, latestBefore time.Time) ([]*video.Video, error) {
 	var videos []*video.Video
-	query := repo.db.WithContext(ctx).Model(&video.Video{}).
-		Order("create_time DESC")
+	query := repo.db.WithContext(ctx).Model(&video.Video{})
 	if !latestBefore.IsZero() {
 		query = query.Where("create_time < ?", latestBefore)
 	}
-	if err := query.Limit(limit).Find(&videos).Error; err != nil {
+	if err := query.Order("create_time DESC").Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil
 }
 
-func (repo *FeedRepository) ListLikesCountWithCursor(ctx context.Context, limit int, cursor *LikesCountCursor) ([]*video.Video, error) {
+func (repo *FeedRepository) ListLikesCountWithCursor(ctx context.Context, req ListLikesCountRequest) ([]*video.Video, error) {
 	var videos []*video.Video
 	query := repo.db.WithContext(ctx).Model(&video.Video{}).
 		Order("likes_count DESC, id DESC")
 
-	if cursor != nil {
+	if req.LastID != nil && req.LikesCountBefore != nil {
 		query = query.Where(
 			"(likes_count < ?) OR (likes_count = ? AND id < ?)",
-			cursor.LikesCount,
-			cursor.LikesCount, cursor.ID,
+			req.LikesCountBefore,
+			req.LikesCountBefore, req.LastID,
 		)
 	}
 
-	if err := query.Limit(limit).Find(&videos).Error; err != nil {
+	if err := query.Limit(req.Limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil

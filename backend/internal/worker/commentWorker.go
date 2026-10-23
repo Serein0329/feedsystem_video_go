@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"feedsystem_video_go/internal/db/rabbitmq"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/video"
-	"log"
+	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -25,7 +27,7 @@ func NewCommentWorker(ch *amqp.Channel, comments *video.CommentRepository, queue
 
 func (w *CommentWorker) Run(ctx context.Context) error {
 	if w == nil || w.ch == nil || w.comments == nil {
-		return errors.New("comment worker is not initialized")
+		return errors.New("CommentWorker is not initialized")
 	}
 	if w.queue == "" {
 		return errors.New("queue is required")
@@ -68,12 +70,12 @@ func (w *CommentWorker) handleDelivery(ctx context.Context, d amqp.Delivery) {
 		}
 		if err := w.process(ctx, d.Body); err != nil {
 			if i >= maxRetries {
-				log.Printf("comment worker: 重试 %d 次后仍失败, 丢弃: %v", maxRetries, err)
-				_ = d.Ack(false)
+				logger.Info("CommentWorker : 重试后仍失败, 丢弃", slog.Int("maxRetries", maxRetries), slog.Any("error", err))
+				_ = d.Nack(false, !d.Redelivered)
 				return
 			}
 			wait := time.Duration(1<<i) * time.Second
-			log.Printf("comment worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
+			logger.Info(fmt.Sprintf("CommentWorker : 处理失败, 等待一顿时间后重试(%d/%d)", i+1, maxRetries), slog.Int("wait", int(wait)), slog.Any("error", err))
 			time.Sleep(wait)
 			continue
 		}

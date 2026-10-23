@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	rabbitmq2 "feedsystem_video_go/internal/db/rabbitmq"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/sse"
 	"feedsystem_video_go/internal/video"
-	"log"
+	"fmt"
+	"log/slog"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -17,59 +19,43 @@ import (
 type Notification = sse.Notification
 
 type NotificationWorker struct {
-	rmq *rabbitmq2.RabbitMQ
-	db  *gorm.DB
-	hub NotificationHub
+	queue string
+	ch    *amqp.Channel
+	db    *gorm.DB
+	hub   NotificationHub
 }
 
 type NotificationHub interface {
 	Push(userID uint, n *Notification)
 }
 
-func NewNotificationWorker(rmq *rabbitmq2.RabbitMQ, db *gorm.DB, hub NotificationHub) *NotificationWorker {
-	return &NotificationWorker{rmq: rmq, db: db, hub: hub}
+func NewNotificationWorker(queue string, ch *amqp.Channel, db *gorm.DB, hub NotificationHub) *NotificationWorker {
+	return &NotificationWorker{queue: queue, ch: ch, db: db, hub: hub}
 }
 
 func (w *NotificationWorker) Run(ctx context.Context) error {
-	if w == nil || w.rmq == nil {
-		return errors.New("notification worker is not initialized")
+	if w == nil || w.ch == nil {
+		return fmt.Errorf("NotificationWorker-%s is not initialized", w.queue)
 	}
-	for _, q := range rabbitmq2.NotificationQueues() {
-		go func(queue string) {
-			for {
-				if ctx.Err() != nil {
-					return
-				}
-				ch, err := w.rmq.NewChannel()
-				if err != nil {
-					log.Printf("notificationWorker-%s: 创建 Channel 失败: %v, 5秒后重试", queue, err)
-					time.Sleep(5 * time.Second)
-					continue
-				}
-				deliveries, err := ch.Consume(queue, "", false, false, false, false, nil)
-				if err != nil {
-					log.Printf("notificationWorker-%s: 消费消息失败: %v, 5秒后重试", queue, err)
-					goto consumeLoop
-				}
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case d, ok := <-deliveries:
-						if !ok {
-							log.Printf("notificationWorker-%s: 通道关闭, 5秒后重试", queue)
-							goto consumeLoop
-						}
-						w.handleDelivery(ctx, d)
-					}
-				}
-			consumeLoop:
-				_ = ch.Close()
-				time.Sleep(5 * time.Second)
+	if w.queue == "" {
+		return errors.New("queue is required")
+	}
+
+	deliveries, err := w.ch.Consume(w.queue, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case d, ok := <-deliveries:
+			if !ok {
+				return errors.New("deliveries channel closed")
 			}
-		}(q)
+			w.handleDelivery(ctx, d)
+		}
 	}
-	return nil
 }
 
 func (w *NotificationWorker) handleDelivery(ctx context.Context, d amqp.Delivery) {
@@ -83,12 +69,12 @@ func (w *NotificationWorker) handleDelivery(ctx context.Context, d amqp.Delivery
 		}
 		if err := w.process(ctx, d); err != nil {
 			if i >= maxRetries {
-				log.Printf("notification worker: 重试 %d 次后仍失败, 丢弃: %v", maxRetries, err)
-				_ = d.Ack(false)
+				logger.Info("NotificationWorker : 重试后仍失败, 丢弃", slog.String("queue", w.queue), slog.Int("maxRetries", maxRetries), slog.Any("error", err))
+				_ = d.Nack(false, !d.Redelivered)
 				return
 			}
 			wait := time.Duration(1<<i) * time.Second
-			log.Printf("notification worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
+			logger.Info(fmt.Sprintf("NotificationWorker : 处理失败, 等待一顿时间后重试(%d/%d)", i+1, maxRetries), slog.String("queue", w.queue), slog.Int("wait", int(wait)), slog.Any("error", err))
 			time.Sleep(wait)
 			continue
 		}

@@ -53,7 +53,7 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 		return err
 	}
 	if err := vs.timelineMQ.PublishVideo(ctx, video.ID, video.CreateTime); err != nil {
-		logger.Info("publish mq failed",
+		logger.Info("Video : Publish mq failed",
 			slog.String("excahnge", rabbitmq.TimelineExchange),
 			slog.String("bindingkey", rabbitmq.TimelineBindingKey),
 			slog.Any("error", err))
@@ -66,14 +66,13 @@ func (vs *VideoService) SearchVideos(ctx context.Context, keyword string, lastID
 	if err != nil {
 		return SearchVideosResponse{}, err
 	}
-	if len(videos) == 0 {
-		// 保留请求传入的游标，避免客户端把 last_id=0 当成“重新从头查询”
-		return SearchVideosResponse{LastID: lastID}, nil
+	if len(videos) > 0 {
+		lastID = videos[len(videos)-1].ID
 	}
 	return SearchVideosResponse{
 		Videos:  videos,
 		HasMore: len(videos) == limit,
-		LastID:  videos[len(videos)-1].ID,
+		NextID:  lastID,
 	}, nil
 }
 
@@ -93,7 +92,7 @@ func (vs *VideoService) Delete(ctx context.Context, id uint, authorID uint) erro
 		defer cancel()
 		cacheKey := vs.cache.Key("video:entity:%d", id)
 		if err = vs.cache.Del(cahceCtx, cacheKey); err != nil {
-			logger.Info("Del cache failed", slog.String("key", cacheKey), slog.Any("error", err))
+			logger.Info("Video : Del cache failed", slog.String("key", cacheKey), slog.Any("error", err))
 		}
 	}
 	return nil
@@ -112,13 +111,13 @@ func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID, lastID uin
 	if err != nil {
 		return ListByAuthorIDResponse{}, err
 	}
-	if len(videos) == 0 {
-		return ListByAuthorIDResponse{LastID: lastID}, nil
+	if len(videos) > 0 {
+		lastID = videos[len(videos)-1].ID
 	}
 	return ListByAuthorIDResponse{
 		Videos:  videos,
 		HasMore: len(videos) == limit,
-		LastID:  videos[len(videos)-1].ID,
+		NextID:  lastID,
 	}, nil
 }
 
@@ -148,7 +147,7 @@ func (vs *VideoService) GetByID(ctx context.Context, id uint) (*Video, error) {
 		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
 		if err := vs.cache.SetBytes(opCtx, cacheKey, b, vs.cacheTTL); err != nil {
-			logger.Info("Set cache failed", slog.String("key", cacheKey), slog.Any("error", err))
+			logger.Info("Video : Set cache failed", slog.String("key", cacheKey), slog.Any("error", err))
 		}
 	}
 

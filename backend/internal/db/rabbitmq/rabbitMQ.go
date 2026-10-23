@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"feedsystem_video_go/internal/config"
-	"log"
+	"feedsystem_video_go/internal/pkg/logger"
+	"log/slog"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -86,7 +87,7 @@ func DeclareTopic(ch *amqp.Channel, exchange string, queue string, bindingKey st
 		return err
 	}
 	if err := DeclareDLX(ch, queue); err != nil {
-		log.Printf("DLX declare failed for %s: %v", queue, err)
+		logger.Info("DLX declare failed", slog.String("queue", queue), slog.Any("error", err))
 	}
 	return nil
 }

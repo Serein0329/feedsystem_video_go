@@ -108,20 +108,31 @@ func (h *SSEHub) SSEHandler(c *gin.Context) {
 }
 
 func (h *SSEHub) ListHandler(c *gin.Context) {
+	var req ListRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Limit <= 0 || req.Limit > 100 {
+		req.Limit = 50
+	}
 	userID, _ := mw.GetAccountIDByGIN(c)
 	var notifications []Notification
-	if err := h.db.WithContext(c.Request.Context()).
-		Where("recipient_id = ?", userID).
-		Order("created_at desc").
-		Limit(50).
-		Find(&notifications).Error; err != nil {
+	query := h.db.WithContext(c.Request.Context()).Where("recipient_id = ?", userID)
+	if req.LastID > 0 {
+		query = query.Where("id < ?", req.LastID)
+	}
+	if err := query.Order("id desc").Limit(req.Limit).Find(&notifications).Error; err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
 	if notifications == nil {
 		notifications = []Notification{}
 	}
-	response.Success(c, gin.H{"notifications": notifications})
+	if len(notifications) > 0 {
+		req.LastID = notifications[len(notifications)-1].ID
+	}
+	response.SuccessWithPage(c, notifications, len(notifications) == req.Limit, req.LastID)
 }
 
 func (h *SSEHub) MarkReadHandler(c *gin.Context) {

@@ -25,6 +25,6 @@ type ListMyLikedVideosRequest struct {
 
 type ListMyLikedVideosResponse struct {
 	Videos  []Video `json:"videos"`
-	LastID  uint    `json:"last_id"`
+	NextID  uint    `json:"next_id"`
 	HasMore bool    `json:"has_more"`
 }

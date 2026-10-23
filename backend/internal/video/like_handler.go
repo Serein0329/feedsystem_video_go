@@ -81,5 +81,5 @@ func (lh *LikeHandler) ListMyLikedVideos(c *gin.Context) {
 	if res.Videos == nil {
 		res.Videos = []Video{}
 	}
-	response.SuccessWithPage(c, res.Videos, res.HasMore, res.LastID)
+	response.SuccessWithPage(c, res.Videos, res.HasMore, res.NextID)
 }

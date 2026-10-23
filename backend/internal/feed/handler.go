@@ -24,20 +24,20 @@ func (f *FeedHandler) ListLatest(c *gin.Context) {
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
-		req.Limit = 10
+		req.Limit = 20
 	}
 	var latestTime time.Time
 	if req.LatestTime > 0 {
 		latestTime = time.UnixMilli(req.LatestTime)
 	}
 	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
-	feedItems, err := f.service.ListLatest(c.Request.Context(), req.Limit, latestTime, viewerAccountID)
+	res, err := f.service.ListLatest(c.Request.Context(), req.Limit, latestTime, viewerAccountID)
 	if err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-	feedItems.VideoList = nonNilFeedVideoItems(feedItems.VideoList)
-	response.Success(c, feedItems)
+	res.VideoList = nonNilFeedVideoItems(res.VideoList)
+	response.Success(c, res)
 }
 
 func (f *FeedHandler) ListLikesCount(c *gin.Context) {
@@ -47,28 +47,23 @@ func (f *FeedHandler) ListLikesCount(c *gin.Context) {
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
-		req.Limit = 10
+		req.Limit = 20
 	}
 
-	var cursor *LikesCountCursor
-	if req.LikesCountBefore != nil || req.IDBefore != nil {
-		if req.LikesCountBefore == nil || req.IDBefore == nil {
+	if req.LikesCountBefore != nil || req.LastID != nil {
+		if req.LikesCountBefore == nil || req.LastID == nil {
 			response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "likes_count_before and id_before must be provided together"})
 			return
 		}
-		cursor = &LikesCountCursor{
-			LikesCount: *req.LikesCountBefore,
-			ID:         *req.IDBefore,
-		}
 	}
 	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
-	feedItems, err := f.service.ListLikesCount(c.Request.Context(), req.Limit, cursor, viewerAccountID)
+	res, err := f.service.ListLikesCount(c.Request.Context(), req, viewerAccountID)
 	if err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-	feedItems.VideoList = nonNilFeedVideoItems(feedItems.VideoList)
-	response.Success(c, feedItems)
+	res.VideoList = nonNilFeedVideoItems(res.VideoList)
+	response.Success(c, res)
 }
 
 func (f *FeedHandler) ListByFollowing(c *gin.Context) {
@@ -78,20 +73,20 @@ func (f *FeedHandler) ListByFollowing(c *gin.Context) {
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
-		req.Limit = 10
+		req.Limit = 20
 	}
 	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 	var latestTime time.Time
 	if req.LatestTime > 0 {
-		latestTime = time.Unix(req.LatestTime, 0)
+		latestTime = time.UnixMilli(req.LatestTime)
 	}
-	feedItems, err := f.service.ListByFollowing(c.Request.Context(), req.Limit, latestTime, viewerAccountID)
+	res, err := f.service.ListByFollowing(c.Request.Context(), req.Limit, latestTime, viewerAccountID)
 	if err != nil {
 		response.FailByErrCode(c, apierror.ErrInternalServer.WithInternal(err))
 		return
 	}
-	feedItems.VideoList = nonNilFeedVideoItems(feedItems.VideoList)
-	response.Success(c, feedItems)
+	res.VideoList = nonNilFeedVideoItems(res.VideoList)
+	response.Success(c, res)
 }
 
 func (f *FeedHandler) ListByPopularity(c *gin.Context) {

@@ -13,3 +13,14 @@ type Notification struct {
 	IsRead      bool      `gorm:"default:false" json:"is_read"`
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
+
+type ListRequest struct {
+	Limit  int  `json:"limit"`
+	LastID uint `json:"last_id"`
+}
+
+type ListResponse struct {
+	Notifications []Notification `json:"notifications"`
+	HasMore       bool           `json:"has_more"`
+	NextID        uint           `json:"next_id"`
+}

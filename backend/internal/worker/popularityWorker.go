@@ -6,8 +6,10 @@ import (
 	"errors"
 	"feedsystem_video_go/internal/db/rabbitmq"
 	rediscache "feedsystem_video_go/internal/db/redis"
+	"feedsystem_video_go/internal/pkg/logger"
 	"feedsystem_video_go/internal/video"
-	"log"
+	"fmt"
+	"log/slog"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -25,7 +27,7 @@ func NewPopularityWorker(ch *amqp.Channel, cache *rediscache.Client, queue strin
 
 func (w *PopularityWorker) Run(ctx context.Context) error {
 	if w == nil || w.ch == nil || w.cache == nil {
-		return errors.New("popularity worker is not initialized")
+		return errors.New("PopularityWorker is not initialized")
 	}
 	if w.queue == "" {
 		return errors.New("queue is required")
@@ -68,12 +70,12 @@ func (w *PopularityWorker) handleDelivery(ctx context.Context, d amqp.Delivery) 
 		}
 		if err := w.process(ctx, d.Body); err != nil {
 			if i >= maxRetries {
-				log.Printf("popularity worker: 重试 %d 次后仍失败, 丢弃: %v", maxRetries, err)
-				_ = d.Ack(false)
+				logger.Info("PopularityWorker : 重试后仍失败, 丢弃", slog.Int("maxRetries", maxRetries), slog.Any("error", err))
+				_ = d.Nack(false, !d.Redelivered)
 				return
 			}
 			wait := time.Duration(1<<i) * time.Second
-			log.Printf("popularity worker: 处理失败, %v 后重试 (%d/%d): %v", wait, i+1, maxRetries, err)
+			logger.Info(fmt.Sprintf("PopularityWorker : 处理失败, 等待一顿时间后重试(%d/%d)", i+1, maxRetries), slog.Int("wait", int(wait)), slog.Any("error", err))
 			time.Sleep(wait)
 			continue
 		}

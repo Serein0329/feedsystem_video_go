@@ -104,13 +104,13 @@ func (s *CommentService) GetAll(ctx context.Context, videoID, lastID uint, limit
 	if err != nil {
 		return GetAllCommentsResponse{}, err
 	}
-	if len(comments) == 0 {
-		return GetAllCommentsResponse{LastID: lastID}, nil
+	if len(comments) > 0 {
+		lastID = comments[len(comments)-1].ID
 	}
 	return GetAllCommentsResponse{
 		Comments: comments,
 		HasMore:  len(comments) == limit,
-		LastID:   comments[len(comments)-1].ID,
+		NextID:   lastID,
 	}, nil
 }
 
@@ -153,6 +153,6 @@ func (s *CommentService) notifyMentions(ctx context.Context, comment *Comment) {
 		}
 	}
 	if err := s.repo.db.WithContext(ctx).Create(&notifs).Error; err != nil {
-		logger.Info("DB create mention notifications failed", slog.Any("error", err))
+		logger.Info("Comment : Create db mention notifications failed", slog.Any("error", err))
 	}
 }

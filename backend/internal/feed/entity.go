@@ -33,7 +33,7 @@ type ListLatestResponse struct {
 type ListLikesCountRequest struct {
 	Limit            int    `json:"limit"`
 	LikesCountBefore *int64 `json:"likes_count_before" binding:"omitempty,min=0"`
-	IDBefore         *uint  `json:"id_before" binding:"omitempty,min=1"`
+	LastID           *uint  `json:"last_id" binding:"omitempty,min=1"`
 }
 
 type LikesCountCursor struct {

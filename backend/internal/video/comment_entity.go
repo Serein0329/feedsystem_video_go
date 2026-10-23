@@ -29,5 +29,5 @@ type GetAllCommentsRequest struct {
 type GetAllCommentsResponse struct {
 	Comments []Comment `json:"comments"`
 	HasMore  bool      `json:"has_more"`
-	LastID   uint      `json:"last_id"`
+	NextID   uint      `json:"next_id"`
 }

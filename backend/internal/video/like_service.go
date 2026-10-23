@@ -129,12 +129,12 @@ func (s *LikeService) ListLikedVideos(ctx context.Context, accountID, lastID uin
 	for i := range rows {
 		videos = append(videos, rows[i].Video)
 	}
-	if len(rows) == 0 {
-		return ListMyLikedVideosResponse{LastID: lastID}, nil
+	if len(rows) > 0 {
+		lastID = rows[len(rows)-1].LikeID
 	}
 	return ListMyLikedVideosResponse{
 		Videos:  videos,
-		LastID:  rows[len(rows)-1].LikeID,
+		NextID:  lastID,
 		HasMore: len(rows) == limit,
 	}, nil
 }

@@ -69,19 +69,21 @@ func (h *SocialHandler) GetAllFollowers(c *gin.Context) {
 		return
 	}
 
+	if req.Limit <= 0 || req.Limit >= 50 {
+		req.Limit = 20
+	}
 	if req.VloggerID == 0 {
 		req.VloggerID, _ = mw.GetAccountIDByGIN(c)
 	}
-	followers, err := h.service.GetAllFollowers(c.Request.Context(), req.VloggerID)
+	res, err := h.service.GetAllFollowers(c.Request.Context(), req.VloggerID, req.LastID, req.Limit)
 	if err != nil {
 		response.FailByErr(c, err)
 		return
 	}
-	if followers == nil {
-		followers = []*account.Account{}
+	if res.Followers == nil {
+		res.Followers = []account.Account{}
 	}
-	followerCount, _ := h.service.CountFollowers(c.Request.Context(), req.VloggerID)
-	response.Success(c, GetAllFollowersResponse{Followers: followers, FollowerCount: followerCount})
+	response.SuccessWithPage(c, res.Followers, res.HasMore, res.NextID)
 }
 
 func (h *SocialHandler) GetAllVloggers(c *gin.Context) {
@@ -91,20 +93,21 @@ func (h *SocialHandler) GetAllVloggers(c *gin.Context) {
 		return
 	}
 
+	if req.Limit <= 0 || req.Limit >= 50 {
+		req.Limit = 20
+	}
 	if req.FollowerID == 0 {
 		req.FollowerID, _ = mw.GetAccountIDByGIN(c)
 	}
-
-	vloggers, err := h.service.GetAllVloggers(c.Request.Context(), req.FollowerID)
+	res, err := h.service.GetAllVloggers(c.Request.Context(), req.FollowerID, req.LastID, req.Limit)
 	if err != nil {
 		response.FailByErr(c, err)
 		return
 	}
-	if vloggers == nil {
-		vloggers = []*account.Account{}
+	if res.Vloggers == nil {
+		res.Vloggers = []account.Account{}
 	}
-	vloggerCount, _ := h.service.CountVloggers(c.Request.Context(), req.FollowerID)
-	response.Success(c, GetAllVloggersResponse{Vloggers: vloggers, VloggerCount: vloggerCount})
+	response.SuccessWithPage(c, res.Vloggers, res.HasMore, res.NextID)
 }
 
 func (h *SocialHandler) GetCounts(c *gin.Context) {

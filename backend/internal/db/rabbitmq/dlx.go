@@ -1,7 +1,8 @@
 package rabbitmq
 
 import (
-	"log"
+	"feedsystem_video_go/internal/pkg/logger"
+	"log/slog"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -31,7 +32,7 @@ func DeclareDLX(ch *amqp.Channel, queueName string) error {
 	if err := ch.QueueBind(dlxQueue, "#", DLXExchange, false, nil); err != nil {
 		return err
 	}
-	log.Printf("DLX ready: exchange=%s queue=%s", DLXExchange, dlxQueue)
+	logger.Info("DLX ready", slog.String("exchange", DLXExchange), slog.String("queue", dlxQueue))
 	return nil
 }
 

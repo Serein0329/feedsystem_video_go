@@ -50,11 +50,11 @@ type UpdateLikesCountRequest struct {
 type SearchVideosResponse struct {
 	Videos  []Video `json:"videos"`
 	HasMore bool    `json:"has_more"`
-	LastID  uint    `json:"last_id"`
+	NextID  uint    `json:"next_id"`
 }
 
 type ListByAuthorIDResponse struct {
 	Videos  []Video `json:"videos"`
 	HasMore bool    `json:"has_more"`
-	LastID  uint    `json:"last_id"`
+	NextID  uint    `json:"next_id"`
 }

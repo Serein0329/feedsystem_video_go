@@ -67,36 +67,49 @@ func (s *SocialService) Unfollow(ctx context.Context, followerID, vloggerID uint
 func (s *SocialService) Isfollowed(ctx context.Context, followerID, vloggerID uint) (bool, error) {
 	return s.repo.IsFollowed(ctx, followerID, vloggerID)
 }
-func (s *SocialService) invalidateFollowingFeedCache(ctx context.Context, accountID uint) {
-	if s.cache == nil {
-		return
-	}
-	pattern := s.cache.Key("feed:listByFollowing:*:accountID=%d:*", accountID)
-	if err := s.cache.DelByPattern(ctx, pattern); err != nil {
-		logger.Info("Del cache failed", slog.String("key", pattern), slog.Any("error", err))
-	}
-}
 
-func (s *SocialService) GetAllFollowers(ctx context.Context, VloggerID uint) ([]*account.Account, error) {
+func (s *SocialService) GetAllFollowers(ctx context.Context, VloggerID, lastID uint, limit int) (GetAllFollowersResponse, error) {
 	isExist, err := s.accountrepo.IsExist(ctx, VloggerID)
 	if err != nil {
-		return nil, err
+		return GetAllFollowersResponse{}, err
 	}
 	if !isExist {
-		return nil, apierror.ErrUserNotFound
+		return GetAllFollowersResponse{}, apierror.ErrUserNotFound
 	}
-	return s.repo.GetAllFollowers(ctx, VloggerID)
+	acc, err := s.repo.GetAllFollowers(ctx, VloggerID, lastID, limit)
+	if err != nil {
+		return GetAllFollowersResponse{}, err
+	}
+	if len(acc) > 0 {
+		lastID = acc[len(acc)-1].ID
+	}
+	return GetAllFollowersResponse{
+		Followers: acc,
+		NextID:    lastID,
+		HasMore:   len(acc) == limit,
+	}, nil
 }
 
-func (s *SocialService) GetAllVloggers(ctx context.Context, FollowerID uint) ([]*account.Account, error) {
+func (s *SocialService) GetAllVloggers(ctx context.Context, FollowerID, lastID uint, limit int) (GetAllVloggersResponse, error) {
 	isExist, err := s.accountrepo.IsExist(ctx, FollowerID)
 	if err != nil {
-		return nil, err
+		return GetAllVloggersResponse{}, err
 	}
 	if !isExist {
-		return nil, apierror.ErrUserNotFound
+		return GetAllVloggersResponse{}, apierror.ErrUserNotFound
 	}
-	return s.repo.GetAllVloggers(ctx, FollowerID)
+	acc, err := s.repo.GetAllVloggers(ctx, FollowerID, lastID, limit)
+	if err != nil {
+		return GetAllVloggersResponse{}, err
+	}
+	if len(acc) > 0 {
+		lastID = acc[len(acc)-1].ID
+	}
+	return GetAllVloggersResponse{
+		Vloggers: acc,
+		NextID:   lastID,
+		HasMore:  len(acc) == limit,
+	}, nil
 }
 
 func (s *SocialService) CountFollowers(ctx context.Context, vloggerID uint) (int64, error) {
@@ -105,4 +118,14 @@ func (s *SocialService) CountFollowers(ctx context.Context, vloggerID uint) (int
 
 func (s *SocialService) CountVloggers(ctx context.Context, followerID uint) (int64, error) {
 	return s.repo.CountVloggers(ctx, followerID)
+}
+
+func (s *SocialService) invalidateFollowingFeedCache(ctx context.Context, accountID uint) {
+	if s.cache == nil {
+		return
+	}
+	pattern := s.cache.Key("feed:listByFollowing:*:accountID=%d:*", accountID)
+	if err := s.cache.DelByPattern(ctx, pattern); err != nil {
+		logger.Info("Social : Del cache failed", slog.String("key", pattern), slog.Any("error", err))
+	}
 }

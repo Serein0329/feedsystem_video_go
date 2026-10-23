@@ -27,7 +27,7 @@ func NewTimelineWorker(ch *amqp.Channel, cache *rediscache.Client, queue string)
 
 func (w *TimelineWorker) Run(ctx context.Context) error {
 	if w == nil || w.ch == nil {
-		return errors.New("timeline worker is not initialized")
+		return errors.New("TimelineWorker is not initialized")
 	}
 	if w.queue == "" {
 		return errors.New("queue is required")
@@ -70,12 +70,12 @@ func (w *TimelineWorker) handleDelivery(ctx context.Context, d amqp.Delivery) {
 		}
 		if err := w.process(ctx, d.Body); err != nil {
 			if i >= maxRetries {
-				logger.Info("TimelineWorker:重试后仍失败, 丢弃", slog.Int("maxRetries", maxRetries), slog.Any("error", err))
-				_ = d.Ack(false)
+				logger.Info("TimelineWorker : 重试后仍失败, 丢弃", slog.Int("maxRetries", maxRetries), slog.Any("error", err))
+				_ = d.Nack(false, !d.Redelivered)
 				return
 			}
 			wait := time.Duration(1<<i) * time.Second
-			logger.Info(fmt.Sprintf("TimelineWorker:处理失败, 等待一顿时间后重试(%d/%d)", i+1, maxRetries), slog.Int("wait", int(wait)), slog.Any("error", err))
+			logger.Info(fmt.Sprintf("TimelineWorker : 处理失败, 等待一顿时间后重试(%d/%d)", i+1, maxRetries), slog.Int("wait", int(wait)), slog.Any("error", err))
 			time.Sleep(wait)
 			continue
 		}
@@ -90,6 +90,9 @@ func (w *TimelineWorker) process(ctx context.Context, body []byte) error {
 		// 解析事件失败，直接丢弃
 		return nil
 	}
+	if evt.VideoID == 0 {
+		return nil
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
@@ -102,7 +105,7 @@ func (w *TimelineWorker) process(ctx context.Context, body []byte) error {
 	}
 
 	if err := w.cache.ZRemRangeByRank(ctx, cacheKey, 0, -1001); err != nil {
-		logger.Info("TimelineWorker:ZRemRangeByRank失败", slog.String("key", cacheKey), slog.Any("error", err))
+		logger.Info("TimelineWorker : ZRemRangeByRank失败", slog.String("key", cacheKey), slog.Any("error", err))
 	}
 	return nil
 }

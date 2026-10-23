@@ -27,8 +27,11 @@ func Start(cfg *config.ServerConfig, db *gorm.DB, cache *redis.Client, rmq *rabb
 	if err != nil {
 		return fmt.Errorf("failed to start app server in port %q: %w", cfg.Port, err)
 	}
+
+	ctx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
 	server := &http.Server{
-		Handler:           SetGIN(db, cache, rmq),
+		Handler:           SetGIN(ctx, db, cache, rmq),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 	}

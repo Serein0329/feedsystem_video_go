@@ -6,8 +6,8 @@ import (
 
 type Social struct {
 	ID         uint `gorm:"primaryKey"`
-	FollowerID uint `gorm:"not null;index:idx_social_follower;uniqueIndex:idx_social_follower_vlogger"`
-	VloggerID  uint `gorm:"not null;index:idx_social_vlogger;uniqueIndex:idx_social_follower_vlogger"`
+	FollowerID uint `gorm:"not null;uniqueIndex:idx_social_follower_vlogger,priority:1"`
+	VloggerID  uint `gorm:"not null;index:idx_social_vlogger;uniqueIndex:idx_social_follower_vlogger,priority:2"`
 }
 
 type FollowRequest struct {
@@ -24,20 +24,26 @@ type IsfollowedRequest struct {
 
 type GetAllFollowersRequest struct {
 	VloggerID uint `json:"vlogger_id"`
+	Limit     int  `json:"limit"`
+	LastID    uint `json:"last_id"`
 }
 
 type GetAllVloggersRequest struct {
 	FollowerID uint `json:"follower_id"`
+	Limit      int  `json:"limit"`
+	LastID     uint `json:"last_id"`
 }
 
 type GetAllFollowersResponse struct {
-	Followers     []*account.Account `json:"followers"`
-	FollowerCount int64              `json:"follower_count"`
+	Followers []account.Account `json:"followers"`
+	NextID    uint              `json:"next_id"`
+	HasMore   bool              `json:"has_more"`
 }
 
 type GetAllVloggersResponse struct {
-	Vloggers     []*account.Account `json:"vloggers"`
-	VloggerCount int64              `json:"vlogger_count"`
+	Vloggers []account.Account `json:"vloggers"`
+	NextID   uint              `json:"next_id"`
+	HasMore  bool              `json:"has_more"`
 }
 
 type GetCountsResponse struct {

@@ -18,4 +18,12 @@ type SendRequest struct {
 
 type ListRequest struct {
 	PeerID uint `json:"peer_id" binding:"required"`
+	LastID uint `json:"last_id" `
+	Limit  int  `json:"limit" `
+}
+
+type ListResponse struct {
+	Messages []Message `json:"messages"`
+	HasMore  bool      `json:"has_more"`
+	NextID   uint      `json:"next_id"`
 }
