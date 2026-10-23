@@ -20,7 +20,7 @@ func UpdatePopularityCache(ctx context.Context, cache *rediscache.Client, id uin
 		logger.Info("Video : Del cache failed", slog.String("key", cacheKey), slog.Any("error", err))
 	}
 	now := time.Now()
-	windowKey := cache.Key("video:hot:%s", now.Format("200601021504"))
+	windowKey := cache.Key("video:hot:1m:%s", now.Format("200601021504"))
 	member := strconv.FormatUint(uint64(id), 10)
 
 	opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)

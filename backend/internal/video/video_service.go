@@ -25,8 +25,10 @@ type VideoService struct {
 	timelineMQ  *rabbitmq.TimelineMQ
 }
 
+const EntityCacheTTL = 5 * time.Minute
+
 func NewVideoService(repo *VideoRepository, accounRepo *account.AccountRepository, cache *rediscache.Client, popularityMQ *rabbitmq.TimelineMQ) *VideoService {
-	return &VideoService{videoRepo: repo, accountRepo: accounRepo, cache: cache, cacheTTL: 5 * time.Minute, timelineMQ: popularityMQ}
+	return &VideoService{videoRepo: repo, accountRepo: accounRepo, cache: cache, cacheTTL: EntityCacheTTL, timelineMQ: popularityMQ}
 }
 
 func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
@@ -162,7 +164,11 @@ func (vs *VideoService) GetByID(ctx context.Context, id uint) (*Video, error) {
 			lockCancel()
 
 			if lockErr == nil && locked {
-				defer func() { _ = vs.cache.Unlock(ctx, lockKey, token) }()
+				defer func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					defer cancel()
+					_ = vs.cache.Unlock(ctx, lockKey, token)
+				}()
 				if v, err := getCached(); err == nil {
 					return v, nil
 				}

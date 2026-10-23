@@ -26,7 +26,7 @@ func (f *FeedHandler) ListLatest(c *gin.Context) {
 	if req.Limit <= 0 || req.Limit > 50 {
 		req.Limit = 20
 	}
-	var latestTime time.Time
+	latestTime := time.Now()
 	if req.LatestTime > 0 {
 		latestTime = time.UnixMilli(req.LatestTime)
 	}
@@ -76,7 +76,7 @@ func (f *FeedHandler) ListByFollowing(c *gin.Context) {
 		req.Limit = 20
 	}
 	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
-	var latestTime time.Time
+	latestTime := time.Now()
 	if req.LatestTime > 0 {
 		latestTime = time.UnixMilli(req.LatestTime)
 	}
@@ -96,7 +96,7 @@ func (f *FeedHandler) ListByPopularity(c *gin.Context) {
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
-		req.Limit = 10
+		req.Limit = 20
 	}
 	viewerAccountID, _ := mw.GetAccountIDByGIN(c)
 
@@ -138,7 +138,7 @@ func (f *FeedHandler) ListByTag(c *gin.Context) {
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {
-		req.Limit = 10
+		req.Limit = 20
 	}
 	var lastTime time.Time
 	if req.LatestTime > 0 {
