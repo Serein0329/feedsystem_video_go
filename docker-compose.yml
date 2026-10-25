@@ -62,7 +62,7 @@ services:
     environment:
       CONFIG_PATH: /app/configs/config.yaml
       JWT_SECRET: ${JWT_SECRET:-feedsystem-dev-secret-key}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-feedsystem}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-feedsystem_video}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
       RABBITMQ_USER: ${RABBITMQ_USER:-admin}

@@ -31,7 +31,7 @@ docker compose up -d --build
 - 后端 API：`http://localhost:8080`
 - RabbitMQ 管理台：`http://localhost:15672`（`admin` / `password123`）
 
-Docker Compose 会读取 `.env`，缺省使用 `feedsystem-dev-secret-key`。生产环境请修改 `JWT_SECRET`。
+Docker Compose 会读取 `backend/.env`，缺省使用 `feedsystem-dev-secret-key`。生产环境请修改 `JWT_SECRET`。
 
 ## 脚本启动
 

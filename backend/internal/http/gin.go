@@ -26,9 +26,6 @@ import (
 func SetGIN(ctx context.Context, db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq2.RabbitMQ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	if err := r.SetTrustedProxies(nil); err != nil {
-		logger.Info("GIN : SetTrustedProxies failed", slog.Any("error", err))
-	}
 	r.Use(mw.RecoveryHandler())
 	r.Use(mw.LoggerHandler())
 	r.Use(mw.RequestIDHandler())
@@ -243,13 +240,16 @@ func SetGIN(ctx context.Context, db *gorm.DB, cache *rediscache.Client, rmq *rab
 	// SSE notification
 	sseHub := sse.NewSSEHub(db)
 	notifGroup := r.Group("/notification")
-	notifGroup.Use(mw.SSEAuthHandler())
+	notifGroup.Use(mw.SSEAuthHandler(accountRepository, cache))
 	notifGroup.GET("/stream", sseHub.SSEHandler)
 	notifGroup.POST("/list", sseHub.ListHandler)
 	notifGroup.POST("/markRead", sseHub.MarkReadHandler)
 	notifGroup.POST("/unreadCount", sseHub.UnreadCountHandler)
 
 	//Worker
+	if err := rabbitmq2.NewNotificationMQ(rmq); err != nil {
+		logger.Info("NotificationMQ init failed", slog.Any("error", err))
+	}
 	go runWorkerWithRetry(ctx, "SocialWorker", rmq, func(ch *amqp.Channel) error {
 		return worker.NewSocialWorker(ch, socialRepository, rabbitmq2.SocialQueue).Run(ctx)
 	})

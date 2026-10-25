@@ -2,8 +2,6 @@ package rabbitmq
 
 import (
 	"errors"
-	"feedsystem_video_go/internal/pkg/logger"
-	"log/slog"
 )
 
 const (
@@ -41,7 +39,6 @@ func NewNotificationMQ(base *RabbitMQ) error {
 	var firstErr error
 	for _, t := range notificationTopics {
 		if err := DeclareTopic(ch, t.exchange, t.queue, t.bindingKey); err != nil {
-			logger.Info("NotificationMQ init failed", slog.String("exchange", t.exchange), slog.String("queue", t.queue), slog.Any("error", err))
 			if firstErr == nil {
 				firstErr = err
 			}

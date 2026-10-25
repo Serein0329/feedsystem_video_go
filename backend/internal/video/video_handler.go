@@ -6,6 +6,7 @@ import (
 	"feedsystem_video_go/internal/pkg/randhex"
 	"feedsystem_video_go/internal/pkg/response"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -57,18 +58,19 @@ func (vh *VideoHandler) PublishVideo(c *gin.Context) {
 }
 
 func (vh *VideoHandler) UploadVideo(c *gin.Context) {
+	const maxSize = 10 << 20
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize+1<<20)
 	f, err := c.FormFile("file")
 	if err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
 		return
 	}
 
-	const maxSize = 200 << 20
 	if f.Size <= 0 || f.Size > maxSize {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size max 200MB"})
 		return
 	}
-
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize+1<<20)
 	ext := strings.ToLower(filepath.Ext(f.Filename))
 	if ext != ".mp4" {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "only .mp4 is allowed"})
@@ -103,18 +105,19 @@ func (vh *VideoHandler) UploadVideo(c *gin.Context) {
 }
 
 func (vh *VideoHandler) UploadCover(c *gin.Context) {
+	const maxSize = 10 << 20
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize+1<<20)
+
 	f, err := c.FormFile("file")
 	if err != nil {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "missing file"})
 		return
 	}
 
-	const maxSize = 10 << 20
 	if f.Size <= 0 || f.Size > maxSize {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "file size max 10MB"})
 		return
 	}
-
 	ext := strings.ToLower(filepath.Ext(f.Filename))
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".webp":

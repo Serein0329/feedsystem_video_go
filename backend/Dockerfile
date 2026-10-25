@@ -1,38 +1,36 @@
-ARG GO_VERSION=1.24.5
+ARG GO_VERSION=1.26.1
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
 
-FROM golang:${GO_VERSION} AS deps
+FROM golang:${GO_VERSION} AS build
 ARG GOPROXY
 ARG GOSUMDB
 ENV GOPROXY=${GOPROXY} \
-    GOSUMDB=${GOSUMDB}
+  GOSUMDB=${GOSUMDB} \
+  CGO_ENABLED=0
 
 WORKDIR /src/backend
 
 COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go mod download
+  --mount=type=cache,target=/root/.cache/go-build \
+  go mod download
 
-FROM deps AS source
 COPY backend/ ./
-
-ENV CGO_ENABLED=0
-
-FROM source AS api-build
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /out/api ./cmd
+  --mount=type=cache,target=/root/.cache/go-build \
+  go build -trimpath -ldflags="-s -w" -o /out/api ./cmd
 
-FROM alpine:3.21 AS base
-RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -s /sbin/nologin app
+FROM alpine:3.21 AS api
+RUN apk add --no-cache ca-certificates tzdata \
+  && adduser -D -H -s /sbin/nologin app \
+  && mkdir -p /app/.run/uploads \
+  && chown -R app:app /app
+
 WORKDIR /app
-COPY --from=source /src/backend/configs ./configs
-RUN mkdir -p ./.run/uploads && chown -R app:app /app
-USER app
+COPY --from=build /src/backend/configs ./configs
+COPY --from=build /out/api ./api
 
-FROM base AS api
-COPY --from=api-build /out/api /app/api
+USER app
 EXPOSE 8080
 ENTRYPOINT ["/app/api"]

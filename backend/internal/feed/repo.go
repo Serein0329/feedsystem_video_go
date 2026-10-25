@@ -19,63 +19,58 @@ func NewFeedRepository(db *gorm.DB) *FeedRepository {
 
 func (repo *FeedRepository) ListLatest(ctx context.Context, limit int, latestBefore time.Time) ([]*video.Video, error) {
 	var videos []*video.Video
-	if err := repo.db.WithContext(ctx).Model(&video.Video{}).
-		Where("create_time < ?", latestBefore).
-		Order("create_time DESC").Limit(limit).Find(&videos).Error; err != nil {
+	query := repo.db.WithContext(ctx).Model(&video.Video{}).Order("create_time DESC")
+	if !latestBefore.IsZero() {
+		query = query.Where("create_time < ?", latestBefore)
+	}
+	if err := query.Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil
 }
 
-func (repo *FeedRepository) ListLikesCountWithCursor(ctx context.Context, req ListLikesCountRequest) ([]*video.Video, error) {
+func (repo *FeedRepository) ListLikesCount(ctx context.Context, limit int, lastID *uint, lastLikesCount *int64) ([]*video.Video, error) {
 	var videos []*video.Video
 	query := repo.db.WithContext(ctx).Model(&video.Video{}).
 		Order("likes_count DESC, id DESC")
 
-	if req.LastID != nil && req.LikesCountBefore != nil {
+	if lastID != nil && lastLikesCount != nil {
 		query = query.Where(
 			"(likes_count < ?) OR (likes_count = ? AND id < ?)",
-			req.LikesCountBefore,
-			req.LikesCountBefore, req.LastID,
+			lastLikesCount,
+			lastLikesCount, lastID,
 		)
 	}
 
-	if err := query.Limit(req.Limit).Find(&videos).Error; err != nil {
+	if err := query.Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil
 }
 
-func (repo *FeedRepository) ListByFollowing(ctx context.Context, limit int, viewerAccountID uint, latestBefore time.Time) ([]*video.Video, error) {
+func (repo *FeedRepository) ListByFollowing(ctx context.Context, limit int, viewerAccountID, lastID uint) ([]*video.Video, error) {
 	var videos []*video.Video
 	followingSubQuery := repo.db.WithContext(ctx).
 		Model(&social.Social{}).
 		Select("vlogger_id").
 		Where("follower_id = ?", viewerAccountID)
-	if err := repo.db.Model(&video.Video{}).
-		Where("author_id IN (?)", followingSubQuery).Where("create_time < ?", latestBefore).
-		Limit(limit).Find(&videos).Error; err != nil {
+
+	query := repo.db.WithContext(ctx).Model(&video.Video{}).
+		Where("author_id IN (?)", followingSubQuery)
+	if lastID > 0 {
+		query = query.Where("id < ?", lastID)
+	}
+	if err := query.Order("id DESC").Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil
 }
 
-func (repo *FeedRepository) ListByPopularity(ctx context.Context, limit int, popularityBefore int64, timeBefore time.Time, idBefore uint) ([]*video.Video, error) {
+func (repo *FeedRepository) ListByPopularity(ctx context.Context, limit int, asofTime time.Time, offset int64) ([]*video.Video, error) {
 	var videos []*video.Video
-	query := repo.db.WithContext(ctx).Model(&video.Video{}).
-		Order("popularity DESC, create_time DESC, id DESC")
-
-	// 只有当游标完整提供时才加过滤（popularity 允许为 0）
-	if !timeBefore.IsZero() && idBefore > 0 {
-		query = query.Where(
-			"(popularity < ?) OR (popularity = ? AND create_time < ?) OR (popularity = ? AND create_time = ? AND id < ?)",
-			popularityBefore,
-			popularityBefore, timeBefore,
-			popularityBefore, timeBefore, idBefore,
-		)
-	}
-
-	if err := query.Limit(limit).Find(&videos).Error; err != nil {
+	if err := repo.db.WithContext(ctx).Model(&video.Video{}).
+		Where("create_time < ?", asofTime).
+		Order("popularity DESC,create_time DESC").Offset(int(offset)).Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil
@@ -93,13 +88,16 @@ func (repo *FeedRepository) GetByIDs(ctx context.Context, ids []uint) ([]*video.
 	return videos, nil
 }
 
-func (repo *FeedRepository) ListByTag(ctx context.Context, tagName string, limit int, lastTime time.Time) ([]*video.Video, error) {
+func (repo *FeedRepository) ListByTag(ctx context.Context, tagName string, limit int, lastID uint) ([]*video.Video, error) {
 	var videos []*video.Video
-	if err := repo.db.WithContext(ctx).Model(&video.Video{}).
+	query := repo.db.WithContext(ctx).Model(&video.Video{}).
 		Joins("JOIN video_tags ON video_tags.video_id = videos.id").
 		Joins("JOIN tags ON tags.id = video_tags.tag_id").
-		Where("tags.name = ?", tagName).Where("create_time < ?", lastTime).
-		Order("videos.create_time desc").Limit(limit).Find(&videos).Error; err != nil {
+		Where("tags.name = ?", tagName)
+	if lastID > 0 {
+		query = query.Where("videos.id < ?", lastID)
+	}
+	if err := query.Order("videos.id desc").Limit(limit).Find(&videos).Error; err != nil {
 		return nil, err
 	}
 	return videos, nil

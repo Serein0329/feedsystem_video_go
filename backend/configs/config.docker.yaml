@@ -22,4 +22,4 @@ rabbitmq:
 
 pprof:
   enabled: false
-  addr: localhost:6060
+  addr: 127.0.0.1:6060

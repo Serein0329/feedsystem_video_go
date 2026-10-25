@@ -79,7 +79,8 @@ func (h *SSEHub) SSEHandler(c *gin.Context) {
 	defer h.Unsubscribe(userID, ch)
 
 	flusher, _ := c.Writer.(http.Flusher)
-
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-c.Request.Context().Done():
@@ -98,7 +99,7 @@ func (h *SSEHub) SSEHandler(c *gin.Context) {
 			if flusher != nil {
 				flusher.Flush()
 			}
-		case <-time.After(30 * time.Second):
+		case <-ticker.C:
 			_, _ = fmt.Fprintf(c.Writer, ": keepalive\n\n")
 			if flusher != nil {
 				flusher.Flush()

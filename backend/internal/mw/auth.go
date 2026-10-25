@@ -87,7 +87,7 @@ func JWTAuthHandler(repo *account.AccountRepository, cache *rediscache.Client, i
 	}
 }
 
-func SSEAuthHandler() gin.HandlerFunc {
+func SSEAuthHandler(repo *account.AccountRepository, cache *rediscache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.Query("token")
 		if token == "" {
@@ -106,6 +106,42 @@ func SSEAuthHandler() gin.HandlerFunc {
 			response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "invalid or expired token"})
 			c.Abort()
 			return
+		}
+
+		key := cache.Key("account:%d:access", claims.AccountID)
+		if cache != nil {
+			cacheCtx, cancel := context.WithTimeout(c.Request.Context(), 50*time.Millisecond)
+			defer cancel()
+
+			b, err := cache.GetBytes(cacheCtx, key)
+			if err == nil {
+				if string(b) != token {
+					response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "token has been revoked"})
+					c.Abort()
+					return
+				}
+				c.Set("accountID", claims.AccountID)
+				c.Set("username", claims.Username)
+				c.Next()
+				return
+			}
+		}
+
+		// Redis 故障/未启用：查 DB 兜底
+		accountInfo, err := repo.FindByID(c.Request.Context(), claims.AccountID)
+		if err != nil || accountInfo.Token == "" || accountInfo.Token != token {
+			response.FailWithDataByErrCode(c, apierror.ErrUnauthorized, gin.H{"error": "token has been revoked"})
+			c.Abort()
+			return
+		}
+
+		if cache != nil {
+			cacheCtx, cancel := context.WithTimeout(c.Request.Context(), 50*time.Millisecond)
+			defer cancel()
+
+			if err := cache.SetBytes(cacheCtx, key, []byte(token), 24*time.Hour); err != nil {
+				logger.Info("Set cache failed", slog.String("key", key), slog.Any("error", err))
+			}
 		}
 		c.Set("accountID", claims.AccountID)
 		c.Next()

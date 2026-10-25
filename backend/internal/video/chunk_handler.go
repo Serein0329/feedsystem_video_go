@@ -83,7 +83,7 @@ func (h *ChunkUploadHandler) getLockWithRetry(ctx context.Context, uploadID stri
 		lockErr error
 	)
 	for range 5 {
-		token, locked, lockErr = h.cache.Lock(ctx, lockKey, 30*time.Second)
+		token, locked, lockErr = h.cache.Lock(ctx, lockKey, 20*time.Second)
 		if lockErr != nil {
 			return "", false, lockErr
 		}
@@ -93,13 +93,13 @@ func (h *ChunkUploadHandler) getLockWithRetry(ctx context.Context, uploadID stri
 		select {
 		case <-ctx.Done():
 			return "", false, ctx.Err()
-		case <-time.After(2 * time.Second):
+		case <-time.After(5 * time.Second):
 		}
 	}
 	return "", false, nil
 }
 
-func (h *ChunkUploadHandler) UnLock(ctx context.Context, uploadID string, token string) error {
+func (h *ChunkUploadHandler) unLock(ctx context.Context, uploadID string, token string) error {
 	lockKey := h.cache.Key("lock:chunk_upload:%s", uploadID)
 	return h.cache.Unlock(ctx, lockKey, token)
 }
@@ -220,9 +220,9 @@ func (h *ChunkUploadHandler) UploadChunk(c *gin.Context) {
 	}
 
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = h.UnLock(ctx, req.UploadID, token)
+		_ = h.unLock(ctx, req.UploadID, token)
 	}()
 
 	session, err := h.getSession(c.Request.Context(), req.UploadID)
@@ -372,9 +372,9 @@ func (h *ChunkUploadHandler) CompleteChunkUpload(c *gin.Context) {
 	}
 
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = h.UnLock(ctx, req.UploadID, token)
+		_ = h.unLock(ctx, req.UploadID, token)
 	}()
 
 	session, err := h.getSession(c.Request.Context(), req.UploadID)

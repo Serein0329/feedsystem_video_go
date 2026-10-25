@@ -2,11 +2,8 @@
 package jwt
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"feedsystem_video_go/internal/pkg/logger"
-	"log/slog"
 	"os"
 	"time"
 
@@ -21,16 +18,11 @@ func jwtSecret() []byte {
 	}
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		b := make([]byte, 32)
-		if _, err := rand.Read(b); err != nil {
-			logger.Warn("cannot generate JWT secret", slog.Any("error", err))
-			cachedSecret = []byte("fallback-unsafe-key-change-me")
-			return cachedSecret
-		}
-		secret = hex.EncodeToString(b)
-		logger.Warn("JWT_SECRET not set, generated random key. All tokens invalid on restart.")
+		cachedSecret = []byte("feedsystem-dev-secret-key")
+		logger.Warn("JWT_SECRET not set, use deafult secrect")
+	} else {
+		cachedSecret = []byte(secret)
 	}
-	cachedSecret = []byte(secret)
 	return cachedSecret
 }
 

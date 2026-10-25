@@ -160,7 +160,7 @@ func (vs *VideoService) GetByID(ctx context.Context, id uint) (*Video, error) {
 			lockKey := vs.cache.Key("lock:%s", cacheKey)
 
 			lockCtx, lockCancel := context.WithTimeout(ctx, 50*time.Millisecond)
-			token, locked, lockErr := vs.cache.Lock(lockCtx, lockKey, 2*time.Second)
+			token, locked, lockErr := vs.cache.Lock(lockCtx, lockKey, 5*time.Second)
 			lockCancel()
 
 			if lockErr == nil && locked {

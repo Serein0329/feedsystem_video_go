@@ -25,7 +25,21 @@ func (vr *VideoRepository) CreateVideo(ctx context.Context, video *Video) error 
 }
 
 func (vr *VideoRepository) DeleteVideo(ctx context.Context, id uint) error {
-	return vr.db.WithContext(ctx).Delete(&Video{}, id).Error
+	return vr.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.WithContext(ctx).Delete(&Video{}, id).Error; err != nil {
+			return err
+		}
+		if err := tx.WithContext(ctx).Where("video_id = ?", id).Delete(&Like{}).Error; err != nil {
+			return err
+		}
+		if err := tx.WithContext(ctx).Where("video_id = ?", id).Delete(&Comment{}).Error; err != nil {
+			return err
+		}
+		if err := tx.WithContext(ctx).Where("video_id = ?", id).Delete(&VideoTag{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID, lastID uint, limit int) ([]Video, error) {

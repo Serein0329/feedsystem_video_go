@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"feedsystem_video_go/internal/config"
-	"feedsystem_video_go/internal/pkg/logger"
-	"log/slog"
+	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -15,6 +14,8 @@ import (
 // RabbitMQ 只管理 Connection，Channel 由各组件按需创建
 type RabbitMQ struct {
 	Conn *amqp.Connection
+	dsn  string
+	mu   sync.Mutex
 }
 
 func NewRabbitMQ(cfg *config.RabbitMQConfig) (*RabbitMQ, error) {
@@ -25,7 +26,7 @@ func NewRabbitMQ(cfg *config.RabbitMQConfig) (*RabbitMQ, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RabbitMQ{Conn: conn}, nil
+	return &RabbitMQ{Conn: conn, dsn: cfg.DSN()}, nil
 }
 
 func (r *RabbitMQ) Close() error {
@@ -71,7 +72,7 @@ func DeclareTopic(ch *amqp.Channel, exchange string, queue string, bindingKey st
 		false,
 		false,
 		false,
-		amqp.Table{"x-dead-letter-exchange": DLXExchange},
+		nil,
 	)
 	if err != nil {
 		return err
@@ -85,9 +86,6 @@ func DeclareTopic(ch *amqp.Channel, exchange string, queue string, bindingKey st
 		nil,
 	); err != nil {
 		return err
-	}
-	if err := DeclareDLX(ch, queue); err != nil {
-		logger.Info("DLX declare failed", slog.String("queue", queue), slog.Any("error", err))
 	}
 	return nil
 }

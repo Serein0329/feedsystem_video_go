@@ -1,7 +1,5 @@
 package feed
 
-import "time"
-
 type FeedAuthor struct {
 	ID       uint   `json:"id"`
 	Username string `json:"username"`
@@ -31,64 +29,50 @@ type ListLatestResponse struct {
 }
 
 type ListLikesCountRequest struct {
-	Limit            int    `json:"limit"`
-	LikesCountBefore *int64 `json:"likes_count_before" binding:"omitempty,min=0"`
-	LastID           *uint  `json:"last_id" binding:"omitempty,min=1"`
-}
-
-type LikesCountCursor struct {
-	LikesCount int64
-	ID         uint
+	Limit          int    `json:"limit"`
+	LastLikesCount *int64 `json:"last_likes_count" binding:"omitempty,min=0"`
+	LastID         *uint  `json:"last_id" binding:"omitempty,min=1"`
 }
 
 type ListLikesCountResponse struct {
-	VideoList            []FeedVideoItem `json:"video_list"`
-	NextLikesCountBefore *int64          `json:"next_likes_count_before,omitempty"`
-	NextIDBefore         *uint           `json:"next_id_before,omitempty"`
-	HasMore              bool            `json:"has_more"`
+	VideoList      []FeedVideoItem `json:"video_list"`
+	NextLikesCount *int64          `json:"next_likes_count,omitempty"`
+	NextID         *uint           `json:"next_id,omitempty"`
+	HasMore        bool            `json:"has_more"`
 }
 
 type ListByFollowingRequest struct {
-	Limit      int   `json:"limit"`
-	LatestTime int64 `json:"latest_time"`
+	Limit    int  `json:"limit"`
+	LatestID uint `json:"latest_id"`
 }
 
 type ListByFollowingResponse struct {
 	VideoList []FeedVideoItem `json:"video_list"`
-	NextTime  int64           `json:"next_time"`
+	NextID    uint            `json:"next_id"`
 	HasMore   bool            `json:"has_more"`
 }
 
 type ListByPopularityRequest struct {
 	Limit  int   `json:"limit"`
-	AsOf   int64 `json:"as_of"`  // 服务器返回的分钟时间戳；第一页传0
-	Offset int   `json:"offset"` // 下一页从这里开始；第一页传0
-
-	// DB fallback 用（可选）
-	LatestPopularity int64     `json:"latest_popularity" binding:"omitempty,min=1"`
-	LatestBefore     time.Time `json:"latest_before"`
-	LatestIDBefore   *uint     `json:"latest_id_before" binding:"omitempty,min=1"`
+	Offset int64 `json:"offset"`
+	Asof   int64 `json:"asof"`
 }
 
 type ListByPopularityResponse struct {
 	VideoList  []FeedVideoItem `json:"video_list"`
-	AsOf       int64           `json:"as_of"`
-	NextOffset int             `json:"next_offset"`
+	NextOffset int64           `json:"next_offset"`
+	Asof       int64           `json:"asof"`
 	HasMore    bool            `json:"has_more"`
-
-	NextLatestPopularity *int64     `json:"next_latest_popularity,omitempty"`
-	NextLatestBefore     *time.Time `json:"next_latest_before,omitempty"`
-	NextLatestIDBefore   *uint      `json:"next_latest_id_before,omitempty"`
 }
 
 type ListByTagRequest struct {
-	TagName    string `json:"tag_name" binding:"required"`
-	Limit      int    `json:"limit"`
-	LatestTime int64  `json:"latest_time"`
+	TagName string `json:"tag_name" binding:"required"`
+	Limit   int    `json:"limit"`
+	LastID  uint   `json:"last_id"`
 }
 
 type ListByTagResponse struct {
 	VideoList []FeedVideoItem `json:"video_list"`
-	NextTime  int64           `json:"next_time"`
+	NextID    uint            `json:"next_id"`
 	HasMore   bool            `json:"has_more"`
 }

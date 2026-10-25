@@ -3,7 +3,7 @@ server:
 
 database:
   host: localhost
-  port: 3307
+  port: 3306
   user: root
   password: 123456
   dbname: feedsystem_video
@@ -22,4 +22,4 @@ rabbitmq:
 
 pprof:
   enabled: true
-  addr: localhost:6060
+  addr: 127.0.0.1:6060

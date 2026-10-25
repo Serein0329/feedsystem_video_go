@@ -33,7 +33,6 @@ func Start(cfg *config.ServerConfig, db *gorm.DB, cache *redis.Client, rmq *rabb
 	server := &http.Server{
 		Handler:           SetGIN(ctx, db, cache, rmq),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
 	}
 
 	serveErr := make(chan error, 1)
@@ -57,7 +56,7 @@ func Start(cfg *config.ServerConfig, db *gorm.DB, cache *redis.Client, rmq *rabb
 		if err := server.Shutdown(ctx); err != nil {
 			logger.Warn("App server shutdown failed", slog.Any("error", err))
 		}
-		logger.Info("App server stopped")
+		logger.Info("App shutdown success")
 		return nil
 	}
 }

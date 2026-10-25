@@ -124,8 +124,8 @@ func (s *SocialService) invalidateFollowingFeedCache(ctx context.Context, accoun
 	if s.cache == nil {
 		return
 	}
-	pattern := s.cache.Key("feed:listByFollowing:*:accountID=%d:*", accountID)
-	if err := s.cache.DelByPattern(ctx, pattern); err != nil {
+	pattern := s.cache.Key("feed:listByFollowing:accountID=%d", accountID)
+	if err := s.cache.Del(ctx, pattern); err != nil {
 		logger.Info("Social : Del cache failed", slog.String("key", pattern), slog.Any("error", err))
 	}
 }
