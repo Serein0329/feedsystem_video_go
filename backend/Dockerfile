@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY backend/ ./
 RUN --mount=type=cache,target=/go/pkg/mod \
   --mount=type=cache,target=/root/.cache/go-build \
-  go build -trimpath -ldflags="-s -w" -o /out/api ./cmd
+  go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/
 
 FROM alpine:3.21 AS api
 RUN apk add --no-cache ca-certificates tzdata \
