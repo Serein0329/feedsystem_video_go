@@ -96,7 +96,7 @@ func (h *AccountHandler) FindByUsername(c *gin.Context) {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	if req.Username == "" {
-		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, "查询用户名不为空")
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "查询用户名不为空"})
 		return
 	}
 	if account, err := h.accountService.FindByUsername(c.Request.Context(), req.Username); err != nil {
@@ -114,7 +114,7 @@ func (h *AccountHandler) FindSimilarName(c *gin.Context) {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	if req.Username == "" {
-		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, "查询用户名不为空")
+		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": "查询用户名不为空"})
 		return
 	}
 	if req.Limit <= 0 || req.Limit > 50 {

@@ -11,7 +11,7 @@ import (
 
 const LevelFatal = slog.LevelError + 4
 
-func Init() {
+func init() {
 	opts := tint.NewTextHandler(os.Stdout, &tint.Options{
 		AddSource: false,
 		Level:     slog.LevelInfo,

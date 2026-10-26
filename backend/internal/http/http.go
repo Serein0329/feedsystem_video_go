@@ -55,8 +55,9 @@ func Start(cfg *config.ServerConfig, db *gorm.DB, cache *redis.Client, rmq *rabb
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
 			logger.Warn("App server shutdown failed", slog.Any("error", err))
+		} else {
+			logger.Info("App shutdown success")
 		}
-		logger.Info("App shutdown success")
 		return nil
 	}
 }

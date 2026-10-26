@@ -61,7 +61,7 @@ func (s *PprofServer) Shutdown() {
 	defer cancel()
 	if err := s.server.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("Pprof shutdown failed", slog.Any("error", err))
-		return
+	} else {
+		logger.Info("Pprof shutdown success")
 	}
-	logger.Info("Pprof shutdown success")
 }

@@ -7,6 +7,7 @@ import (
 	rediscache "feedsystem_video_go/internal/db/redis"
 	apphttp "feedsystem_video_go/internal/http"
 	"feedsystem_video_go/internal/pkg/logger"
+	_ "feedsystem_video_go/internal/pkg/logger"
 	"log/slog"
 	"os"
 
@@ -14,9 +15,6 @@ import (
 )
 
 func main() {
-	//初始化日志
-	logger.Init()
-
 	//导入.env文件到环境变量
 	if err := godotenv.Load(); err != nil {
 		logger.Info("Load .env file failed", slog.Any("error", err))
