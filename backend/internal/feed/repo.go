@@ -36,9 +36,8 @@ func (repo *FeedRepository) ListLikesCount(ctx context.Context, limit int, lastI
 
 	if lastID != nil && lastLikesCount != nil {
 		query = query.Where(
-			"(likes_count < ?) OR (likes_count = ? AND id < ?)",
-			lastLikesCount,
-			lastLikesCount, lastID,
+			"(likes_count , id) < (? , ?)",
+			*lastLikesCount, *lastID,
 		)
 	}
 
