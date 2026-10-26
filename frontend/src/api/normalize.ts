@@ -45,6 +45,7 @@ export function normalizeVideoList(value: Video[] | null | undefined): Video[] {
     play_url: video.play_url || '',
     cover_url: video.cover_url || '',
     likes_count: Number(video.likes_count ?? 0),
+    popularity: Number(video.popularity ?? 0),
   }))
 }
 

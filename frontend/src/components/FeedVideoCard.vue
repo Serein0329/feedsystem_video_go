@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FeedVideoItem } from '../api/types'
+import TagText from './TagText.vue'
 
 const props = defineProps<{
   item: FeedVideoItem
@@ -28,7 +29,7 @@ function onToggle() {
             <RouterLink :to="`/video/${item.id}`">{{ item.title }}</RouterLink>
           </div>
           <div class="subtle">
-            作者：{{ item.author.username }} (#{{ item.author.id }}) · 创建时间：{{ new Date(item.create_time * 1000).toLocaleString() }}
+            作者：{{ item.author.username }} (#{{ item.author.id }}) · 创建时间：{{ new Date(item.create_time).toLocaleString() }}
           </div>
         </div>
         <div class="row">
@@ -45,7 +46,7 @@ function onToggle() {
           </button>
         </div>
       </div>
-      <div v-if="item.description" class="muted" style="margin-top: 8px">{{ item.description }}</div>
+      <div v-if="item.description" class="muted" style="margin-top: 8px"><TagText :text="item.description" /></div>
       <div class="row" style="margin-top: 10px">
         <a class="pill mono" :href="item.play_url" target="_blank" rel="noreferrer">播放地址</a>
         <RouterLink class="pill" :to="`/video/${item.id}`">查看详情 / 评论</RouterLink>

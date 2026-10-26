@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
@@ -7,7 +7,7 @@ import UserAvatar from '../components/UserAvatar.vue'
 import { ApiError } from '../api/client'
 import * as accountApi from '../api/account'
 import * as socialApi from '../api/social'
-import type { Account, Video } from '../api/types'
+import type { Account, ProfileSummary, Video } from '../api/types'
 import * as videoApi from '../api/video'
 import { useAuthStore } from '../stores/auth'
 import { useSocialStore } from '../stores/social'
@@ -27,14 +27,40 @@ const state = reactive({
   loading: false,
   error: '',
   user: null as Account | null,
+  stats: null as ProfileSummary | null,
   videos: [] as Video[],
+  videosHasMore: false,
+  videosNextId: 0,
+  videosLoading: false,
   followers: [] as Account[],
   vloggers: [] as Account[],
   socialLoading: false,
   socialError: '',
 })
 
-const isFollowing = computed(() => (auth.isLoggedIn ? social.isFollowing(userId.value) : false))
+const isFollowing = ref(false)
+
+async function loadProfileStats() {
+  if (!Number.isFinite(userId.value) || userId.value <= 0) return
+  try {
+    state.stats = await accountApi.getProfile(userId.value)
+    state.user = state.stats
+  } catch (e) {
+    state.socialError = e instanceof ApiError ? e.message : String(e)
+  }
+}
+
+async function loadFollowState() {
+  if (!auth.isLoggedIn || isMe.value) {
+    isFollowing.value = false
+    return
+  }
+  try {
+    isFollowing.value = (await socialApi.isfollowed(userId.value)).isFollowed
+  } catch {
+    isFollowing.value = false
+  }
+}
 
 async function loadProfile() {
   if (!Number.isFinite(userId.value) || userId.value <= 0) {
@@ -44,19 +70,43 @@ async function loadProfile() {
 
   state.loading = true
   state.error = ''
+  isFollowing.value = false
   try {
-    const [u, vids] = await Promise.all([accountApi.findById(userId.value), videoApi.listByAuthorId(userId.value)])
-    state.user = u
-    state.videos = vids
+    const [profile, videosRes] = await Promise.all([
+      accountApi.getProfile(userId.value),
+      videoApi.listByAuthorId(userId.value, { limit: 20, last_id: 0 }),
+    ])
+    state.stats = profile
+    state.user = profile
+    state.videos = videosRes.list
+    state.videosHasMore = videosRes.has_more
+    state.videosNextId = videosRes.next_id
   } catch (e) {
     state.error = e instanceof ApiError ? e.message : String(e)
     state.user = null
+    state.stats = null
     state.videos = []
-  } finally {
-    state.loading = false
+    state.videosHasMore = false
+    state.videosNextId = 0
   }
 
-  await loadSocialCounts()
+  await Promise.all([loadSocialCounts(), loadFollowState()])
+  state.loading = false
+}
+
+async function loadMoreVideos() {
+  if (!state.videosHasMore || state.videosLoading) return
+  state.videosLoading = true
+  try {
+    const page = await videoApi.listByAuthorId(userId.value, { limit: 20, last_id: state.videosNextId })
+    state.videos = state.videos.concat(page.list)
+    state.videosHasMore = page.has_more
+    state.videosNextId = page.next_id
+  } catch (e) {
+    state.error = e instanceof ApiError ? e.message : String(e)
+  } finally {
+    state.videosLoading = false
+  }
 }
 
 async function loadSocialCounts() {
@@ -93,12 +143,14 @@ async function toggleFollow() {
   try {
     if (isFollowing.value) {
       await social.unfollow(userId.value)
+      isFollowing.value = false
       toast.info('已取关')
     } else {
       await social.follow(userId.value)
+      isFollowing.value = true
       toast.success('已关注')
     }
-    await loadSocialCounts()
+    await Promise.all([loadSocialCounts(), loadProfileStats()])
   } catch (e) {
     const msg = e instanceof ApiError ? e.message : String(e)
     toast.error(msg)
@@ -158,7 +210,7 @@ watch(
 watch(
   () => auth.isLoggedIn,
   async () => {
-    await loadSocialCounts()
+    await Promise.all([loadSocialCounts(), loadFollowState()])
   },
 )
 
@@ -193,16 +245,20 @@ onMounted(loadProfile)
 
       <div v-else class="row" style="margin-top: 14px">
         <button class="metric" type="button" :disabled="!auth.isLoggedIn || state.socialLoading" @click="openFollowers">
-          <div class="metric-num">{{ auth.isLoggedIn ? (state.socialLoading ? '…' : state.followers.length) : '—' }}</div>
+          <div class="metric-num">{{ state.stats?.follower_count ?? '—' }}</div>
           <div class="metric-label">粉丝</div>
         </button>
         <button class="metric" type="button" :disabled="!auth.isLoggedIn || state.socialLoading" @click="openFollowing">
-          <div class="metric-num">{{ auth.isLoggedIn ? (state.socialLoading ? '…' : state.vloggers.length) : '—' }}</div>
+          <div class="metric-num">{{ state.stats?.vlogger_count ?? '—' }}</div>
           <div class="metric-label">关注</div>
         </button>
         <div class="metric static">
-          <div class="metric-num">{{ state.videos.length }}</div>
+          <div class="metric-num">{{ state.stats?.video_count ?? '—' }}</div>
           <div class="metric-label">作品</div>
+        </div>
+        <div class="metric static">
+          <div class="metric-num">{{ state.stats?.total_likes ?? '—' }}</div>
+          <div class="metric-label">获赞</div>
         </div>
         <div v-if="!auth.isLoggedIn" class="subtle" style="margin-left: 8px">登录后可查看粉丝/关注列表</div>
         <div v-else-if="state.socialError" class="subtle" style="margin-left: 8px">社交信息加载失败：{{ state.socialError }}</div>
@@ -224,6 +280,12 @@ onMounted(loadProfile)
             <div class="video-title">{{ v.title }}</div>
             <div class="video-sub subtle">❤️ {{ v.likes_count }} · {{ new Date(v.create_time).toLocaleDateString() }}</div>
           </div>
+        </button>
+      </div>
+
+      <div v-if="state.videosHasMore" class="row" style="justify-content: center; margin-top: 14px">
+        <button type="button" :disabled="state.videosLoading" @click="loadMoreVideos">
+          {{ state.videosLoading ? '加载中…' : '加载更多' }}
         </button>
       </div>
     </div>

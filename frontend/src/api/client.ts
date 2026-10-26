@@ -1,24 +1,51 @@
 import { useAuthStore } from '../stores/auth'
-import { reportError } from '../utils/error-reporter'
 
 export class ApiError extends Error {
   status: number
+  code?: number
   payload?: unknown
 
-  constructor(message: string, status: number, payload?: unknown) {
+  constructor(message: string, status: number, payload?: unknown, code?: number) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
     this.payload = payload
   }
 }
 
-type ApiErrorBody = { error?: string }
+type ApiEnvelope = {
+  code?: number
+  msg?: string
+  data?: unknown
+}
+
+type ApiErrorData = {
+  error?: string
+}
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
 let isRefreshing = false
 let refreshPromise: Promise<string | null> | null = null
+
+function isEnvelope(value: unknown): value is ApiEnvelope {
+  return !!value && typeof value === 'object' && typeof (value as ApiEnvelope).code === 'number'
+}
+
+function unwrapEnvelope(value: unknown): unknown {
+  return isEnvelope(value) ? value.data : value
+}
+
+function errorMessage(value: unknown, fallback: string): string {
+  if (!isEnvelope(value)) return fallback
+  const data = value.data
+  if (data && typeof data === 'object' && typeof (data as ApiErrorData).error === 'string') {
+    return (data as ApiErrorData).error as string
+  }
+  if (typeof value.msg === 'string' && value.msg) return value.msg
+  return fallback
+}
 
 async function tryRefresh(): Promise<string | null> {
   const auth = useAuthStore()
@@ -33,9 +60,11 @@ async function tryRefresh(): Promise<string | null> {
         body: JSON.stringify({ refresh_token: auth.refreshToken }),
       })
       if (!res.ok) { auth.clearTokens(); return null }
-      const data = await res.json()
+      const body = await res.json()
+      const data = unwrapEnvelope(body) as { token?: string } | null
+      if (!data?.token) { auth.clearTokens(); return null }
       auth.setToken(data.token)
-      return data.token as string
+      return data.token
     } catch {
       auth.clearTokens()
       return null
@@ -111,20 +140,18 @@ export async function postForm<T>(path: string, body: FormData, options?: { auth
 async function handleResponse<T>(res: Response, path: string): Promise<T> {
   const auth = useAuthStore()
   const text = await res.text()
-  let data: unknown = null
+  let body: unknown = null
   if (text) {
-    try { data = JSON.parse(text) } catch { data = text }
+    try { body = JSON.parse(text) } catch { body = text }
   }
 
   if (!res.ok) {
     if (res.status === 401) auth.clearTokens()
-    const msg = data && typeof data === 'object' && (data as ApiErrorBody).error
-      ? String((data as ApiErrorBody).error)
-      : `请求失败 (${res.status})`
-    const apiErr = new ApiError(msg, res.status, data)
-    reportError(apiErr, { path, status: res.status })
+    const code = isEnvelope(body) ? body.code : undefined
+    const apiErr = new ApiError(errorMessage(body, `请求失败 (${res.status})`), res.status, body, code)
+    if (import.meta.env.DEV) console.error('[api]', path, res.status, apiErr.message)
     throw apiErr
   }
 
-  return data as T
+  return unwrapEnvelope(body) as T
 }

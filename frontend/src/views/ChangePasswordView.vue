@@ -5,27 +5,34 @@ import { useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import { ApiError } from '../api/client'
 import * as accountApi from '../api/account'
+import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
 const router = useRouter()
+const auth = useAuthStore()
 const toast = useToastStore()
 
 const busy = ref(false)
-const form = reactive({ username: '', oldPassword: '', newPassword: '' })
+const form = reactive({ oldPassword: '', newPassword: '' })
 
 async function submit() {
   if (busy.value) return
-  const username = form.username.trim()
+  if (!auth.isLoggedIn) {
+    toast.error('请先登录')
+    await router.push('/account')
+    return
+  }
   const oldPassword = form.oldPassword.trim()
   const newPassword = form.newPassword.trim()
-  if (!username || !oldPassword || !newPassword) {
+  if (!oldPassword || !newPassword) {
     toast.error('请把信息填完整')
     return
   }
 
   busy.value = true
   try {
-    await accountApi.changePassword(username, oldPassword, newPassword)
+    await accountApi.changePassword(oldPassword, newPassword)
+    auth.clearTokens()
     toast.success('密码已修改，请重新登录')
     await router.push('/account')
   } catch (e) {
@@ -42,12 +49,8 @@ async function submit() {
     <div class="grid two">
       <div class="card">
         <p class="title">修改密码</p>
-        <p class="subtle">不需要登录（对应后端 `/account/changePassword`）。</p>
+        <p class="subtle">需要登录（对应后端 `/account/changePassword`）。</p>
         <div class="grid" style="margin-top: 12px">
-          <div>
-            <label>username</label>
-            <input v-model.trim="form.username" autocomplete="username" />
-          </div>
           <div>
             <label>old_password</label>
             <input v-model.trim="form.oldPassword" type="password" autocomplete="current-password" />
@@ -69,4 +72,3 @@ async function submit() {
     </div>
   </AppShell>
 </template>
-

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
@@ -25,6 +25,83 @@ const rename = reactive({
   newUsername: '',
 })
 
+const profile = reactive({
+  loading: false,
+  loaded: false,
+  avatar_url: '',
+  bio: '',
+})
+const avatarBusy = ref(false)
+const bioBusy = ref(false)
+const avatarInput = ref<HTMLInputElement | null>(null)
+
+async function loadProfile() {
+  const id = me.value.id
+  if (!auth.isLoggedIn || !id) return
+  profile.loading = true
+  profile.loaded = false
+  try {
+    const res = await accountApi.getProfile(id)
+    profile.avatar_url = res.avatar_url ?? ''
+    profile.bio = res.bio ?? ''
+    profile.loaded = true
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : String(e))
+  } finally {
+    profile.loading = false
+  }
+}
+
+async function pickAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  // updateProfile 会同时覆盖 bio 和 avatar_url，资料未加载时提交会清空另一边
+  if (!profile.loaded) {
+    input.value = ''
+    toast.error('资料尚未加载完成，请重试')
+    return
+  }
+  avatarBusy.value = true
+  try {
+    const res = await accountApi.uploadAvatar(file)
+    await accountApi.updateProfile({ avatar_url: res.avatar_url, bio: profile.bio })
+    profile.avatar_url = res.avatar_url
+    toast.success('头像已更新')
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : String(e))
+  } finally {
+    avatarBusy.value = false
+    input.value = ''
+  }
+}
+
+async function saveBio() {
+  if (bioBusy.value) return
+  if (!profile.loaded) {
+    toast.error('资料尚未加载完成，请重试')
+    return
+  }
+  bioBusy.value = true
+  try {
+    await accountApi.updateProfile({ avatar_url: profile.avatar_url, bio: profile.bio })
+    toast.success('简介已更新')
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : String(e))
+  } finally {
+    bioBusy.value = false
+  }
+}
+
+onMounted(loadProfile)
+
+watch(
+  () => me.value.id,
+  () => {
+    if (auth.isLoggedIn) void loadProfile()
+  },
+)
+
 async function openRename() {
   if (!auth.isLoggedIn) return
   rename.open = true
@@ -44,7 +121,7 @@ async function submitRename() {
   busy.value = true
   try {
     const res = await accountApi.rename(newUsername)
-    auth.setToken(res.token)
+    auth.setTokens(res.token, res.refresh_token ?? auth.refreshToken ?? '')
     rename.open = false
     toast.success('改名成功（已刷新 token）')
   } catch (e) {
@@ -104,7 +181,7 @@ async function onLogout() {
       <div class="card">
         <div class="row" style="justify-content: space-between; align-items: flex-start">
           <div class="row" style="gap: 12px; align-items: center">
-            <UserAvatar :username="me.username" :id="me.id" :size="56" />
+            <UserAvatar :username="me.username" :id="me.id" :size="56" :src="profile.avatar_url" />
             <div>
               <div class="title" style="margin: 0">@{{ me.username }}</div>
               <div class="subtle mono">#{{ me.id }}</div>
@@ -131,6 +208,33 @@ async function onLogout() {
         </div>
 
         <div class="card" style="margin-top: 14px">
+          <div class="row" style="justify-content: space-between; align-items: center">
+            <p class="title" style="margin: 0">个人资料</p>
+            <div class="row">
+              <button class="ghost" type="button" :disabled="!profile.loaded || avatarBusy" @click="avatarInput?.click()">
+                {{ avatarBusy ? '上传中…' : '更换头像' }}
+              </button>
+              <input
+                ref="avatarInput"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                style="display: none"
+                @change="pickAvatar"
+              />
+            </div>
+          </div>
+          <div class="grid" style="margin-top: 12px">
+            <div>
+              <label>bio</label>
+              <textarea v-model.trim="profile.bio" :disabled="!profile.loaded || bioBusy" maxlength="255" />
+            </div>
+            <div class="row" style="justify-content: flex-end">
+              <button class="primary" type="button" :disabled="!profile.loaded || bioBusy" @click="saveBio">保存简介</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 14px">
           <p class="title">账号安全</p>
           <div class="row">
             <button class="ghost" type="button" :disabled="busy" @click="goChangePassword">修改密码</button>
@@ -144,7 +248,7 @@ async function onLogout() {
         <div class="grid" style="margin-top: 10px">
           <div class="pill ok">改名后会返回新 token，旧 token 立即失效</div>
           <div class="pill ok">退出登录会清空本地 token</div>
-          <div class="pill">修改密码无需登录，但成功后会让旧 token 失效</div>
+          <div class="pill">修改密码需要登录，成功后旧 token 立即失效</div>
         </div>
       </div>
     </div>

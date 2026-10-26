@@ -1,29 +1,55 @@
 import { postJson } from './client'
 import { listOrEmpty, normalizeAccount } from './normalize'
-import type { GetAllFollowersResponse, GetAllVloggersResponse, MessageResponse } from './types'
+import type {
+  Account,
+  GetAllFollowersResponse,
+  GetAllVloggersResponse,
+  IsFollowedResponse,
+  PageResponse,
+} from './types'
 
 export function follow(vloggerId: number) {
-  return postJson<MessageResponse>('/social/follow', { vlogger_id: vloggerId }, { authRequired: true })
+  return postJson<null>('/social/follow', { vlogger_id: vloggerId }, { authRequired: true })
 }
 
 export function unfollow(vloggerId: number) {
-  return postJson<MessageResponse>('/social/unfollow', { vlogger_id: vloggerId }, { authRequired: true })
+  return postJson<null>('/social/unfollow', { vlogger_id: vloggerId }, { authRequired: true })
 }
 
-export async function getAllFollowers(vloggerId?: number) {
-  const res = await postJson<GetAllFollowersResponse>(
+export function isfollowed(vloggerId: number) {
+  return postJson<IsFollowedResponse>('/social/isfollowed', { vlogger_id: vloggerId }, { authRequired: true })
+}
+
+export async function getAllFollowers(vloggerId?: number, options?: { limit?: number; last_id?: number }) {
+  const page = await postJson<PageResponse<Account>>(
     '/social/getAllFollowers',
-    vloggerId ? { vlogger_id: vloggerId } : {},
+    {
+      ...(vloggerId ? { vlogger_id: vloggerId } : {}),
+      limit: options?.limit ?? 20,
+      last_id: options?.last_id ?? 0,
+    },
     { authRequired: true },
   )
-  return { ...res, followers: listOrEmpty(res.followers).map(normalizeAccount) }
+  const res: GetAllFollowersResponse = {
+    ...page,
+    followers: listOrEmpty(page.list).map(normalizeAccount),
+  }
+  return res
 }
 
-export async function getAllVloggers(followerId?: number) {
-  const res = await postJson<GetAllVloggersResponse>(
+export async function getAllVloggers(followerId?: number, options?: { limit?: number; last_id?: number }) {
+  const page = await postJson<PageResponse<Account>>(
     '/social/getAllVloggers',
-    followerId ? { follower_id: followerId } : {},
+    {
+      ...(followerId ? { follower_id: followerId } : {}),
+      limit: options?.limit ?? 20,
+      last_id: options?.last_id ?? 0,
+    },
     { authRequired: true },
   )
-  return { ...res, vloggers: listOrEmpty(res.vloggers).map(normalizeAccount) }
+  const res: GetAllVloggersResponse = {
+    ...page,
+    vloggers: listOrEmpty(page.list).map(normalizeAccount),
+  }
+  return res
 }

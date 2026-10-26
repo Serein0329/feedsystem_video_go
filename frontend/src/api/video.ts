@@ -1,12 +1,16 @@
 import { postForm, postJson } from './client'
-import { normalizeVideoList } from './normalize'
-import type { Video } from './types'
+import { listOrEmpty, normalizeVideoList } from './normalize'
+import type { PageResponse, Video } from './types'
 
 export function publishVideo(input: { title: string; description: string; play_url: string; cover_url: string }) {
   return postJson<Video>('/video/publish', input, { authRequired: true })
 }
 
-export type UploadResponse = { url: string; play_url?: string; cover_url?: string }
+export function deleteVideo(id: number) {
+  return postJson<null>('/video/deleteVideo', { id }, { authRequired: true })
+}
+
+export type UploadResponse = { play_url?: string; cover_url?: string }
 
 export function uploadVideo(file: File) {
   const fd = new FormData()
@@ -20,13 +24,32 @@ export function uploadCover(file: File) {
   return postForm<UploadResponse>('/video/uploadCover', fd, { authRequired: true })
 }
 
-export async function listByAuthorId(authorId: number) {
-  const videos = await postJson<Video[] | null>('/video/listByAuthorID', { author_id: authorId })
-  return normalizeVideoList(videos)
+export async function listByAuthorId(authorId: number, options?: { last_id?: number; limit?: number }) {
+  const page = await postJson<PageResponse<Video>>('/video/listByAuthorID', {
+    author_id: authorId,
+    last_id: options?.last_id ?? 0,
+    limit: options?.limit ?? 20,
+  })
+  return {
+    ...page,
+    list: normalizeVideoList(listOrEmpty(page.list)),
+  }
+}
+
+export async function searchVideos(input: { keyword: string; limit?: number; last_id?: number }) {
+  const page = await postJson<PageResponse<Video>>('/video/search', {
+    keyword: input.keyword,
+    limit: input.limit ?? 20,
+    last_id: input.last_id ?? 0,
+  })
+  return {
+    ...page,
+    list: normalizeVideoList(listOrEmpty(page.list)),
+  }
 }
 
 export function getDetail(id: number) {
-  return postJson<Video>('/video/getDetail', { id })
+  return postJson<Video>('/video/getByID', { id })
 }
 
 // --- Chunk Upload API ---

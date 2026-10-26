@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 
 import { ApiError } from '../api/client'
 import type { Account } from '../api/types'
@@ -17,9 +17,6 @@ export const useSocialStore = defineStore('social', () => {
 
   const followersError = ref('')
   const vloggersError = ref('')
-
-  const followerCount = computed(() => followers.value.length)
-  const followingCount = computed(() => vloggers.value.length)
 
   function clear() {
     followers.value = []
@@ -91,8 +88,6 @@ export const useSocialStore = defineStore('social', () => {
   return {
     followers,
     vloggers,
-    followerCount,
-    followingCount,
     followersLoading,
     vloggersLoading,
     followersError,

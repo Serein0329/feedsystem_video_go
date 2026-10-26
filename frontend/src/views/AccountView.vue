@@ -30,35 +30,98 @@ const myVideos = reactive({
   loading: false,
   error: '',
   items: [] as Video[],
+  hasMore: false,
+  nextId: 0,
 })
 
 type VideoTab = 'works' | 'likes'
 const videoTab = ref<VideoTab>('works')
 
 let myVideosReq = 0
-async function loadMyVideos() {
+async function loadMyVideos(reset = true) {
   const id = me.value.id
   if (!auth.isLoggedIn || !id) {
     myVideos.items = []
     myVideos.error = ''
     myVideos.loading = false
+    myVideos.hasMore = false
+    myVideos.nextId = 0
     return
   }
-  if (myVideos.loading) return
+  if (!reset && (myVideos.loading || !myVideos.hasMore)) return
 
   const req = ++myVideosReq
+  if (reset) {
+    myVideos.items = []
+    myVideos.hasMore = false
+    myVideos.nextId = 0
+  }
   myVideos.loading = true
   myVideos.error = ''
   try {
-    const vids = await videoApi.listByAuthorId(id)
+    const page = await videoApi.listByAuthorId(id, {
+      limit: 20,
+      last_id: reset ? 0 : myVideos.nextId,
+    })
     if (req !== myVideosReq) return
-    myVideos.items = vids
+    myVideos.items = reset ? page.list : myVideos.items.concat(page.list)
+    myVideos.hasMore = page.has_more
+    myVideos.nextId = page.next_id
   } catch (e) {
     if (req !== myVideosReq) return
     myVideos.error = e instanceof ApiError ? e.message : String(e)
-    myVideos.items = []
+    if (reset) myVideos.items = []
   } finally {
     if (req === myVideosReq) myVideos.loading = false
+  }
+}
+
+const counts = reactive({
+  loading: false,
+  follower: 0,
+  vlogger: 0,
+  videos: 0,
+  totalLikes: 0,
+})
+
+async function loadCounts() {
+  if (!auth.isLoggedIn) {
+    counts.follower = 0
+    counts.vlogger = 0
+    counts.videos = 0
+    counts.totalLikes = 0
+    return
+  }
+  counts.loading = true
+  try {
+    const profile = await accountApi.getProfile(me.value.id)
+    counts.follower = profile.follower_count
+    counts.vlogger = profile.vlogger_count
+    counts.videos = profile.video_count
+    counts.totalLikes = profile.total_likes
+  } catch {
+    // 计数失败不阻塞页面
+  } finally {
+    counts.loading = false
+  }
+}
+
+const deletingId = ref<number | null>(null)
+
+async function onDeleteVideo(id: number) {
+  if (deletingId.value !== null) return
+  if (!window.confirm('确认删除这个视频？')) return
+  deletingId.value = id
+  try {
+    await videoApi.deleteVideo(id)
+    myVideos.items = myVideos.items.filter((item) => item.id !== id)
+    likedVideos.items = likedVideos.items.filter((item) => item.id !== id)
+    if (counts.videos > 0) counts.videos -= 1
+    toast.info('视频已删除')
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : String(e))
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -67,32 +130,46 @@ const likedVideos = reactive({
   loaded: false,
   error: '',
   items: [] as Video[],
+  hasMore: false,
+  nextId: 0,
 })
 
 let likedVideosReq = 0
-async function loadLikedVideos() {
+async function loadLikedVideos(reset = true) {
   if (!auth.isLoggedIn || !me.value.id) {
     likedVideosReq += 1
     likedVideos.loading = false
     likedVideos.loaded = false
     likedVideos.error = ''
     likedVideos.items = []
+    likedVideos.hasMore = false
+    likedVideos.nextId = 0
     return
   }
-  if (likedVideos.loading) return
+  if (!reset && (likedVideos.loading || !likedVideos.hasMore)) return
 
   const req = ++likedVideosReq
+  if (reset) {
+    likedVideos.items = []
+    likedVideos.hasMore = false
+    likedVideos.nextId = 0
+  }
   likedVideos.loading = true
   likedVideos.error = ''
   try {
-    const vids = await likeApi.listMyLikedVideos()
+    const page = await likeApi.listMyLikedVideos({
+      limit: 20,
+      last_id: reset ? 0 : likedVideos.nextId,
+    })
     if (req !== likedVideosReq) return
-    likedVideos.items = vids
+    likedVideos.items = reset ? page.list : likedVideos.items.concat(page.list)
+    likedVideos.hasMore = page.has_more
+    likedVideos.nextId = page.next_id
     likedVideos.loaded = true
   } catch (e) {
     if (req !== likedVideosReq) return
     likedVideos.error = e instanceof ApiError ? e.message : String(e)
-    likedVideos.items = []
+    if (reset) likedVideos.items = []
     likedVideos.loaded = true
   } finally {
     if (req === likedVideosReq) likedVideos.loading = false
@@ -127,7 +204,7 @@ async function onLogin() {
     const res = await accountApi.login(username, password)
     auth.setTokens(res.token, res.refresh_token ?? '')
     toast.success('登录成功')
-    await social.refreshMine()
+    await Promise.all([social.refreshMine(), loadCounts()])
     await loadMyVideos()
   } catch (e) {
     const msg = e instanceof ApiError ? e.message : String(e)
@@ -139,10 +216,6 @@ async function onLogin() {
 
 async function goRegister() {
   await router.push('/account/register')
-}
-
-async function goChangePassword() {
-  await router.push('/account/change-password')
 }
 
 async function goSettings() {
@@ -206,6 +279,7 @@ watch(
   (id) => {
     if (auth.isLoggedIn && id) {
       void loadMyVideos()
+      void loadCounts()
       if (videoTab.value === 'likes') void loadLikedVideos()
     }
   },
@@ -232,7 +306,6 @@ watch(
 
         <div class="row" style="justify-content: space-between; margin-top: 14px">
           <button class="ghost" type="button" :disabled="busy" @click="goRegister">注册账号</button>
-          <button class="ghost" type="button" :disabled="busy" @click="goChangePassword">修改密码</button>
         </div>
       </div>
     </div>
@@ -255,19 +328,25 @@ watch(
 
         <div class="row" style="margin-top: 14px">
           <button class="metric" type="button" :disabled="social.followersLoading" @click="openFollowers">
-            <div class="metric-num">{{ social.followersLoading ? '…' : social.followerCount }}</div>
+            <div class="metric-num">{{ counts.loading ? '…' : counts.follower }}</div>
             <div class="metric-label">粉丝</div>
           </button>
           <button class="metric" type="button" :disabled="social.vloggersLoading" @click="openFollowing">
-            <div class="metric-num">{{ social.vloggersLoading ? '…' : social.followingCount }}</div>
+            <div class="metric-num">{{ counts.loading ? '…' : counts.vlogger }}</div>
             <div class="metric-label">关注</div>
           </button>
           <button class="metric" type="button" :class="{ active: videoTab === 'works' }" @click="openWorksVideos">
-            <div class="metric-num">{{ myVideos.loading ? '…' : myVideos.items.length }}</div>
+            <div class="metric-num">{{ counts.loading ? '…' : counts.videos }}</div>
             <div class="metric-label">作品</div>
           </button>
+          <div class="metric static">
+            <div class="metric-num">{{ counts.loading ? '…' : counts.totalLikes }}</div>
+            <div class="metric-label">获赞</div>
+          </div>
           <button class="metric" type="button" :class="{ active: videoTab === 'likes' }" @click="openLikedVideos">
-            <div class="metric-num">{{ likedVideos.loading ? '…' : likedVideos.loaded ? likedVideos.items.length : '—' }}</div>
+            <div class="metric-num">
+              {{ likedVideos.loading ? '…' : likedVideos.loaded ? likedVideos.items.length + (likedVideos.hasMore ? '+' : '') : '—' }}
+            </div>
             <div class="metric-label">点赞</div>
           </button>
           <div v-if="socialErrorHint" class="subtle" style="margin-left: 8px">社交信息加载失败：{{ socialErrorHint }}</div>
@@ -281,22 +360,36 @@ watch(
         </div>
 
         <template v-if="videoTab === 'works'">
-          <div v-if="myVideos.loading" class="hint" style="margin-top: 12px">加载中…</div>
+          <div v-if="myVideos.loading && myVideos.items.length === 0" class="hint" style="margin-top: 12px">加载中…</div>
           <div v-else-if="myVideos.error" class="hint bad" style="margin-top: 12px">{{ myVideos.error }}</div>
           <div v-else-if="myVideos.items.length === 0" class="hint" style="margin-top: 12px">暂无作品</div>
 
           <div v-else class="video-grid" style="margin-top: 12px">
-            <button v-for="v in myVideos.items" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
+            <div v-for="v in myVideos.items" :key="v.id" class="video-card" @click="goVideo(v.id)">
               <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
               <div class="video-meta">
                 <div class="video-title">{{ v.title }}</div>
                 <div class="video-sub subtle">❤️ {{ v.likes_count }} · {{ new Date(v.create_time).toLocaleDateString() }}</div>
               </div>
+              <button
+                class="delete-btn"
+                type="button"
+                :disabled="deletingId === v.id"
+                @click.stop="onDeleteVideo(v.id)"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+
+          <div v-if="myVideos.hasMore" class="row" style="justify-content: center; margin-top: 14px">
+            <button type="button" :disabled="myVideos.loading" @click="loadMyVideos(false)">
+              {{ myVideos.loading ? '加载中…' : '加载更多' }}
             </button>
           </div>
         </template>
         <template v-else>
-          <div v-if="likedVideos.loading" class="hint" style="margin-top: 12px">加载中…</div>
+          <div v-if="likedVideos.loading && likedVideos.items.length === 0" class="hint" style="margin-top: 12px">加载中…</div>
           <div v-else-if="likedVideos.error" class="hint bad" style="margin-top: 12px">{{ likedVideos.error }}</div>
           <div v-else-if="likedVideos.items.length === 0" class="hint" style="margin-top: 12px">暂无点赞视频</div>
 
@@ -307,6 +400,12 @@ watch(
                 <div class="video-title">{{ v.title }}</div>
                 <div class="video-sub subtle">❤️ {{ v.likes_count }} · {{ new Date(v.create_time).toLocaleDateString() }}</div>
               </div>
+            </button>
+          </div>
+
+          <div v-if="likedVideos.hasMore" class="row" style="justify-content: center; margin-top: 14px">
+            <button type="button" :disabled="likedVideos.loading" @click="loadLikedVideos(false)">
+              {{ likedVideos.loading ? '加载中…' : '加载更多' }}
             </button>
           </div>
         </template>
@@ -493,6 +592,7 @@ watch(
 }
 
 .video-card {
+  position: relative;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.05);
   border-radius: 8px;
@@ -500,6 +600,19 @@ watch(
   cursor: pointer;
   padding: 0;
   text-align: left;
+}
+
+.delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(254, 44, 85, 0.6);
+  background: rgba(0, 0, 0, 0.62);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .video-card:hover {

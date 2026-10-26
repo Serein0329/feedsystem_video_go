@@ -1,16 +1,20 @@
 import { postJson } from './client'
-import { normalizeCommentList } from './normalize'
-import type { Comment, MessageResponse } from './types'
+import { listOrEmpty, normalizeCommentList } from './normalize'
+import type { Comment, PageResponse } from './types'
 
-export async function listAll(videoId: number) {
-  const comments = await postJson<Comment[] | null>('/comment/listAll', { video_id: videoId })
-  return normalizeCommentList(comments)
+export async function listAll(videoId: number, options?: { limit?: number; last_id?: number }) {
+  const page = await postJson<PageResponse<Comment>>('/comment/listAll', {
+    video_id: videoId,
+    limit: options?.limit ?? 20,
+    last_id: options?.last_id ?? 0,
+  })
+  return normalizeCommentList(listOrEmpty(page.list))
 }
 
 export function publish(videoId: number, content: string) {
-  return postJson<MessageResponse>('/comment/publish', { video_id: videoId, content }, { authRequired: true })
+  return postJson<null>('/comment/publish', { video_id: videoId, content }, { authRequired: true })
 }
 
 export function remove(commentId: number) {
-  return postJson<MessageResponse>('/comment/delete', { comment_id: commentId }, { authRequired: true })
+  return postJson<null>('/comment/delete', { comment_id: commentId }, { authRequired: true })
 }

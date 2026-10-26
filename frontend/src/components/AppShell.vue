@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../stores/auth'
+import { useNotificationStore } from '../stores/notification'
 import { useSocialStore } from '../stores/social'
 import Toaster from './Toaster.vue'
 
@@ -10,6 +11,7 @@ const props = defineProps<{ full?: boolean }>()
 
 const auth = useAuthStore()
 const social = useSocialStore()
+const notifications = useNotificationStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -24,10 +26,24 @@ watch(
 watch(
   () => auth.isLoggedIn,
   (v) => {
-    if (v) void social.refreshMine()
-    else social.clear()
+    if (v) {
+      void social.refreshMine()
+      notifications.connect()
+      void notifications.refreshUnread()
+    } else {
+      social.clear()
+      notifications.clear()
+    }
   },
   { immediate: true },
+)
+
+// token 刷新后重连 SSE，避免继续使用旧 token
+watch(
+  () => auth.token,
+  () => {
+    if (auth.isLoggedIn) notifications.connect()
+  },
 )
 
 const userLabel = computed(() => {
@@ -39,7 +55,7 @@ const userLabel = computed(() => {
 
 async function onSearch() {
   const q = search.value.trim()
-  await router.push({ path: '/', query: q ? { q } : {} })
+  await router.push({ path: '/search', query: q ? { q } : {} })
 }
 
 async function goLogin() {
@@ -62,6 +78,10 @@ async function goSettings() {
         <RouterLink class="dy-nav-link" to="/video">发布</RouterLink>
         <RouterLink class="dy-nav-link" to="/account">账号</RouterLink>
         <RouterLink v-if="auth.isLoggedIn" class="dy-nav-link" to="/messages">私信</RouterLink>
+        <RouterLink v-if="auth.isLoggedIn" class="dy-nav-link" to="/notifications">
+          通知
+          <span v-if="notifications.unread > 0" class="dy-badge">{{ notifications.unread }}</span>
+        </RouterLink>
         <RouterLink class="dy-nav-link" to="/settings">设置</RouterLink>
       </nav>
 
@@ -84,7 +104,7 @@ async function goSettings() {
         </div>
 
         <div class="dy-search">
-          <input v-model="search" class="dy-search-input" placeholder="搜索标题 / 作者（本地过滤）" @keydown.enter="onSearch" />
+          <input v-model="search" class="dy-search-input" placeholder="搜索视频 / 用户" @keydown.enter="onSearch" />
           <button class="dy-btn dy-btn-primary" type="button" @click="onSearch">搜索</button>
         </div>
 
@@ -98,6 +118,7 @@ async function goSettings() {
         <RouterLink class="dy-mobile-link" to="/hot">热榜</RouterLink>
         <RouterLink class="dy-mobile-link" to="/video">发布</RouterLink>
         <RouterLink v-if="auth.isLoggedIn" class="dy-mobile-link" to="/messages">私信</RouterLink>
+        <RouterLink v-if="auth.isLoggedIn" class="dy-mobile-link" to="/notifications">通知</RouterLink>
         <RouterLink class="dy-mobile-link" to="/account">账号</RouterLink>
       </nav>
 
@@ -158,6 +179,21 @@ async function goSettings() {
   background: rgba(255, 255, 255, 0.04);
   color: rgba(246, 248, 251, 0.86);
   text-decoration: none;
+}
+
+.dy-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: rgba(255, 93, 115, 0.9);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .dy-nav-link.router-link-active {

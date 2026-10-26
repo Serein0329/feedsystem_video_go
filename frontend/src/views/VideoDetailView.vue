@@ -3,10 +3,12 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
+import TagText from '../components/TagText.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import { ApiError } from '../api/client'
 import * as commentApi from '../api/comment'
 import * as likeApi from '../api/like'
+import * as socialApi from '../api/social'
 import type { Comment, Video } from '../api/types'
 import * as videoApi from '../api/video'
 import { useAuthStore } from '../stores/auth'
@@ -31,6 +33,8 @@ const state = reactive({
 
 const muted = ref(true)
 const videoEl = ref<HTMLVideoElement | null>(null)
+const isFollowing = ref(false)
+const isOwner = computed(() => !!state.video && auth.claims?.account_id === state.video.author_id)
 
 const drawer = reactive({
   open: false,
@@ -54,10 +58,23 @@ async function loadVideo() {
   state.error = ''
   try {
     state.video = await videoApi.getDetail(id.value)
+    await loadFollowState()
   } catch (e) {
     state.error = e instanceof ApiError ? e.message : String(e)
   } finally {
     state.loading = false
+  }
+}
+
+async function loadFollowState() {
+  if (!auth.isLoggedIn || !state.video || isOwner.value) {
+    isFollowing.value = false
+    return
+  }
+  try {
+    isFollowing.value = (await socialApi.isfollowed(state.video.author_id)).isFollowed
+  } catch {
+    isFollowing.value = false
   }
 }
 
@@ -129,16 +146,33 @@ async function toggleFollow() {
 
   state.busy = true
   try {
-    if (social.isFollowing(state.video.author_id)) {
+    if (isFollowing.value) {
       await social.unfollow(state.video.author_id)
+      isFollowing.value = false
       toast.info('已取关')
     } else {
       await social.follow(state.video.author_id)
+      isFollowing.value = true
       toast.success('已关注')
     }
   } catch (e) {
     const msg = e instanceof ApiError ? e.message : String(e)
     toast.error(msg)
+  } finally {
+    state.busy = false
+  }
+}
+
+async function removeVideo() {
+  if (!state.video) return
+  if (!window.confirm('确认删除这个视频？')) return
+  state.busy = true
+  try {
+    await videoApi.deleteVideo(state.video.id)
+    toast.info('视频已删除')
+    await router.push(`/u/${state.video.author_id}`)
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : String(e))
   } finally {
     state.busy = false
   }
@@ -240,7 +274,7 @@ watch(
 watch(
   () => auth.isLoggedIn,
   async () => {
-    await loadIsLiked()
+    await Promise.all([loadIsLiked(), loadFollowState()])
   },
 )
 
@@ -260,6 +294,7 @@ onMounted(async () => {
           <RouterLink class="chip" to="/">← 返回推荐</RouterLink>
         </div>
         <div class="top-right">
+          <button v-if="isOwner" class="chip danger" type="button" :disabled="state.busy" @click="removeVideo">删除视频</button>
           <button class="chip" type="button" @click="toggleMute">{{ muted ? '静音' : '有声' }}</button>
         </div>
       </div>
@@ -286,7 +321,7 @@ onMounted(async () => {
               <span class="author-name">@{{ state.video.username }}</span>
             </RouterLink>
             <div class="title">{{ state.video.title }}</div>
-            <div v-if="state.video.description" class="desc">{{ state.video.description }}</div>
+            <div v-if="state.video.description" class="desc"><TagText :text="state.video.description" /></div>
             <div class="row" style="margin-top: 10px">
               <a class="chip mono" :href="state.video.play_url" target="_blank" rel="noreferrer">play_url</a>
               <a class="chip mono" :href="state.video.cover_url" target="_blank" rel="noreferrer">cover_url</a>
@@ -305,14 +340,14 @@ onMounted(async () => {
             </button>
 
             <button
-              v-if="!auth.claims?.account_id || auth.claims.account_id !== state.video.author_id"
+              v-if="!isOwner"
               class="act"
               type="button"
               :disabled="state.busy"
               @click.stop="toggleFollow"
             >
               <span class="icon">＋</span>
-              <span class="count">{{ social.isFollowing(state.video.author_id) ? '已关注' : '关注' }}</span>
+              <span class="count">{{ isFollowing ? '已关注' : '关注' }}</span>
             </button>
 
             <button class="act" type="button" @click.stop="share">

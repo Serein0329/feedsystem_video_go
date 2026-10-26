@@ -34,11 +34,11 @@ async function loadHot(reset: boolean) {
   try {
     const res = await feedApi.listByPopularity({
       limit: state.limit,
-      as_of: reset ? 0 : state.asOf,
+      asof: reset ? 0 : state.asOf,
       offset: reset ? 0 : state.nextOffset,
     })
     state.hasMore = res.has_more
-    state.asOf = res.as_of
+    state.asOf = res.asof
     state.nextOffset = res.next_offset
     state.items = reset ? res.video_list : state.items.concat(res.video_list)
   } catch (e) {

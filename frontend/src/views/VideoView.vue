@@ -252,8 +252,8 @@ async function onPublish() {
     stage.value = '上传封面'
     const coverRes = await videoApi.uploadCover(publishForm.cover!)
 
-    const coverUrl = coverRes.url || coverRes.cover_url || ''
-    const playUrl = videoRes.url || videoRes.play_url || ''
+    const coverUrl = coverRes.cover_url || ''
+    const playUrl = videoRes.play_url || ''
     if (!coverUrl || !playUrl) {
       toast.error('上传成功但缺少 url')
       return
