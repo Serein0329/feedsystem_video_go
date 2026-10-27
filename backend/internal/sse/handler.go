@@ -137,8 +137,6 @@ func (h *SSEHub) ListHandler(c *gin.Context) {
 }
 
 func (h *SSEHub) MarkReadHandler(c *gin.Context) {
-	userID, _ := mw.GetAccountIDByGIN(c)
-
 	var req struct {
 		ID *uint `json:"id" binding:"omitempty,min=1"`
 	}
@@ -147,8 +145,8 @@ func (h *SSEHub) MarkReadHandler(c *gin.Context) {
 		response.FailWithDataByErrCode(c, apierror.ErrBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
 	var err error
+	userID, _ := mw.GetAccountIDByGIN(c)
 	if req.ID != nil {
 		err = h.db.WithContext(c.Request.Context()).Model(&Notification{}).Where("id = ? AND recipient_id = ?", *req.ID, userID).Update("is_read", true).Error
 	} else {
